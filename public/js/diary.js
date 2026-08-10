@@ -1,6 +1,7 @@
 import { add, get, queryIndex, put, remove } from "./db.js";
 import { foodPointsForGrams } from "./foods.js";
 import { roundProPoints } from "./points.js";
+import { recipePointsForServings } from "./recipes.js";
 import { listWeighIns } from "./users.js";
 
 export const MEALS = Object.freeze(["breakfast", "lunch", "dinner", "snack", "other"]);
@@ -73,15 +74,44 @@ function resolveQuantity(food, input) {
 async function buildEntry(input, existing, options) {
   const user = await get("users", input.userId);
   if (!user) throw new RangeError("Cannot add a diary entry for a user that does not exist.");
-
-  const food = await get("foods", input.foodId);
-  if (!food) throw new RangeError("Cannot add a diary entry for a food that does not exist.");
-
   const date = requireText(input.date, "date");
   parseDate(date);
   const meal = requireMeal(input.meal);
-  const quantity = resolveQuantity(food, input);
-  const rawPoints = foodPointsForGrams(food, quantity.grams);
+  const itemType = input.itemType ?? existing?.itemType ?? "food";
+  let item;
+
+  if (itemType === "recipe") {
+    const recipeId = input.recipeId ?? input.itemId;
+    const recipe = await get("recipes", recipeId);
+    if (!recipe) throw new RangeError("Cannot add a diary entry for a recipe that does not exist.");
+    const quantity = requirePositiveNumber(input.quantity, "quantity");
+    item = {
+      itemType: "recipe",
+      itemId: recipe.id,
+      recipeId: recipe.id,
+      description: recipe.name,
+      quantity,
+      unit: "serving",
+      servingId: undefined,
+      grams: undefined,
+      rawPoints: recipePointsForServings(recipe, quantity)
+    };
+  } else if (itemType === "food") {
+    const food = await get("foods", input.foodId);
+    if (!food) throw new RangeError("Cannot add a diary entry for a food that does not exist.");
+    const quantity = resolveQuantity(food, input);
+    item = {
+      itemType: "food",
+      itemId: food.id,
+      foodId: food.id,
+      description: food.brand ? `${food.name} · ${food.brand}` : food.name,
+      ...quantity,
+      rawPoints: foodPointsForGrams(food, quantity.grams)
+    };
+  } else {
+    throw new RangeError("itemType must be food or recipe.");
+  }
+
   const timestamp = options.timestamp ?? new Date().toISOString();
 
   return {
@@ -89,13 +119,8 @@ async function buildEntry(input, existing, options) {
     userId: user.id,
     date,
     meal,
-    itemType: "food",
-    itemId: food.id,
-    foodId: food.id,
-    description: food.brand ? `${food.name} · ${food.brand}` : food.name,
-    ...quantity,
-    rawPoints,
-    displayPoints: roundProPoints(rawPoints),
+    ...item,
+    displayPoints: roundProPoints(item.rawPoints),
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp
   };

@@ -21,6 +21,15 @@ import {
   updateFood
 } from "./foods.js";
 import { roundProPoints } from "./points.js";
+import {
+  calculateRecipe,
+  createRecipe,
+  deleteRecipe,
+  listRecipes,
+  recipePointsForServings,
+  searchRecipes,
+  updateRecipe
+} from "./recipes.js";
 import { createRouter } from "./router.js";
 import {
   addWeighIn,
@@ -50,6 +59,12 @@ let editingDiaryEntryId;
 let pendingDeleteDiaryEntryId;
 let diaryNotice;
 let selectedWeekDate = localDateString();
+let showingRecipeForm = false;
+let editingRecipeId;
+let pendingDeleteRecipeId;
+let pendingRecipeDiaryId;
+let recipeSearchQuery = "";
+let recipeNotice;
 let renderSequence = 0;
 
 function createElement(tagName, options = {}) {
@@ -730,6 +745,319 @@ function renderFoodsScreen(foods) {
   return screen;
 }
 
+function ingredientUnitValue(ingredient) {
+  return ingredient?.unit === "serving" ? `serving:${ingredient.servingId}` : ingredient?.unit ?? "g";
+}
+
+function createRecipeIngredientRow(foods, ingredient, onChange) {
+  const row = createElement("div", { className: "recipe-ingredient-row" });
+  row.dataset.ingredientId = ingredient?.id ?? `ingredient-${globalThis.crypto.randomUUID()}`;
+  const search = createElement("input", {
+    attributes: { type: "search", placeholder: "Search saved foods", "aria-label": "Search ingredient food", autocomplete: "off" }
+  });
+  const foodSelect = createElement("select", { attributes: { "aria-label": "Ingredient food", "data-ingredient-food": "", required: "" } });
+  const quantity = createElement("input", {
+    attributes: {
+      type: "number",
+      value: ingredient?.quantity ?? "1",
+      min: "0.1",
+      step: "0.1",
+      "aria-label": "Ingredient quantity",
+      "data-ingredient-quantity": "",
+      required: ""
+    }
+  });
+  const unit = createElement("select", { attributes: { "aria-label": "Ingredient unit", "data-ingredient-unit": "", required: "" } });
+  const points = createElement("span", { className: "recipe-ingredient-points", text: "— PP", attributes: { "data-ingredient-points": "" } });
+  const remove = createElement("button", { className: "button button--small button--secondary", text: "Remove", attributes: { type: "button" } });
+
+  function currentFood() {
+    return foods.find((food) => food.id === foodSelect.value);
+  }
+
+  function populateUnits(preferredValue) {
+    const food = currentFood();
+    unit.replaceChildren(
+      createElement("option", { text: "grams", attributes: { value: "g" } }),
+      createElement("option", { text: "millilitres (1 ml = 1 g)", attributes: { value: "ml" } }),
+      createElement("option", { text: "each (default serving)", attributes: { value: "each" } })
+    );
+    food?.servings.forEach((serving) => {
+      unit.append(createElement("option", {
+        text: `${serving.description} (${serving.grams} g)`,
+        attributes: { value: `serving:${serving.id}` }
+      }));
+    });
+    const wanted = preferredValue ?? "g";
+    unit.value = [...unit.options].some((option) => option.value === wanted) ? wanted : "g";
+  }
+
+  function populateFoods(query, preferredFoodId) {
+    const normalized = normalizeFoodName(query);
+    const matching = foods.filter((food) =>
+      !normalized
+      || (food.normalizedName ?? normalizeFoodName(food.name)).includes(normalized)
+      || (food.normalizedBrand ?? normalizeFoodName(food.brand)).includes(normalized)
+    );
+    const wanted = preferredFoodId ?? foodSelect.value;
+    foodSelect.replaceChildren();
+    matching.forEach((food) => {
+      foodSelect.append(createElement("option", {
+        text: food.brand ? `${food.name} · ${food.brand}` : food.name,
+        attributes: { value: food.id }
+      }));
+    });
+    if (matching.some((food) => food.id === wanted)) foodSelect.value = wanted;
+    populateUnits(ingredient && foodSelect.value === ingredient.foodId ? ingredientUnitValue(ingredient) : undefined);
+  }
+
+  search.addEventListener("input", () => {
+    populateFoods(search.value);
+    onChange();
+  });
+  foodSelect.addEventListener("change", () => {
+    populateUnits();
+    onChange();
+  });
+  quantity.addEventListener("input", onChange);
+  unit.addEventListener("change", onChange);
+  remove.addEventListener("click", () => {
+    row.remove();
+    onChange();
+  });
+  populateFoods("", ingredient?.foodId);
+  row.append(search, foodSelect, quantity, unit, points, remove);
+  return row;
+}
+
+function recipeInputFromForm(form) {
+  const values = new FormData(form);
+  const ingredients = [...form.querySelectorAll(".recipe-ingredient-row")].map((row) => {
+    const selectedUnit = row.querySelector("[data-ingredient-unit]").value;
+    const isServing = selectedUnit.startsWith("serving:");
+    return {
+      id: row.dataset.ingredientId,
+      foodId: row.querySelector("[data-ingredient-food]").value,
+      quantity: Number(row.querySelector("[data-ingredient-quantity]").value),
+      unit: isServing ? "serving" : selectedUnit,
+      servingId: isServing ? selectedUnit.slice("serving:".length) : undefined
+    };
+  });
+  return {
+    name: values.get("recipeName"),
+    servings: numberValue(values, "recipeServings"),
+    ingredients
+  };
+}
+
+function createRecipeForm(foods, recipe) {
+  const card = createElement("section", { className: "card form-card recipe-form-card" });
+  card.append(createElement("h3", { text: recipe ? `Edit ${recipe.name}` : "Create recipe" }));
+  const form = createElement("form", { className: "data-form" });
+  const fields = createElement("div", { className: "form-grid" });
+  fields.append(
+    createField({ label: "Recipe name", name: "recipeName", value: recipe?.name, attributes: { autocomplete: "off" } }),
+    createField({ label: "Number of servings", name: "recipeServings", type: "number", min: "0.1", step: "0.1", value: recipe?.servings ?? "1" })
+  );
+  const ingredientFieldset = createElement("fieldset", { className: "recipe-ingredient-editor" });
+  ingredientFieldset.append(createElement("legend", { text: "Ingredients" }));
+  const ingredientRows = createElement("div", { className: "recipe-ingredient-rows" });
+  const total = createElement("p", {
+    className: "food-calculation",
+    text: "Add ingredients to calculate recipe ProPoints.",
+    attributes: { role: "status", "aria-live": "polite" }
+  });
+
+  function updatePreview() {
+    try {
+      const calculated = calculateRecipe(recipeInputFromForm(form), foods);
+      [...ingredientRows.children].forEach((row, index) => {
+        row.querySelector("[data-ingredient-points]").textContent = `${displayPoints(calculated.ingredients[index].rawPoints)} PP`;
+      });
+      total.textContent = `${displayPoints(calculated.rawTotalPoints)} PP total · ${displayPoints(calculated.rawPointsPerServing)} PP per serving`;
+    } catch {
+      [...ingredientRows.children].forEach((row) => {
+        row.querySelector("[data-ingredient-points]").textContent = "— PP";
+      });
+      total.textContent = "Add complete ingredient quantities to calculate recipe ProPoints.";
+    }
+  }
+
+  const initialIngredients = recipe?.ingredients?.length ? recipe.ingredients : [undefined];
+  initialIngredients.forEach((ingredient) => ingredientRows.append(createRecipeIngredientRow(foods, ingredient, updatePreview)));
+  const addIngredient = createElement("button", { className: "button button--secondary", text: "Add ingredient", attributes: { type: "button" } });
+  addIngredient.addEventListener("click", () => {
+    ingredientRows.append(createRecipeIngredientRow(foods, undefined, updatePreview));
+    updatePreview();
+  });
+  ingredientFieldset.append(
+    ingredientRows,
+    createElement("p", { className: "form-note", text: "Millilitres currently use the configurable default conversion of 1 ml = 1 g." }),
+    addIngredient
+  );
+  form.addEventListener("input", updatePreview);
+  form.addEventListener("change", updatePreview);
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const submit = createElement("button", { className: "button button--primary", text: recipe ? "Save recipe" : "Create recipe", attributes: { type: "submit" } });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", () => {
+    showingRecipeForm = false;
+    editingRecipeId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(submit, cancel);
+  form.append(fields, ingredientFieldset, total, message, actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    showFormMessage(message, "Saving recipe…", "progress");
+    try {
+      const input = recipeInputFromForm(form);
+      const saved = recipe ? await updateRecipe(recipe.id, input) : await createRecipe(input);
+      showingRecipeForm = false;
+      editingRecipeId = undefined;
+      recipeNotice = `${saved.name} ${recipe ? "updated" : "created"}.`;
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not save recipe", error);
+      showFormMessage(message, error.message);
+      submit.disabled = false;
+    }
+  });
+  card.append(form);
+  queueMicrotask(updatePreview);
+  return card;
+}
+
+function recipeIngredientText(ingredient, food) {
+  const unit = ingredient.unit === "serving" ? ingredient.unitDescription : ingredient.unitDescription ?? ingredient.unit;
+  return `${food?.name ?? "Missing food"} · ${ingredient.quantity} ${unit} · ${ingredient.grams} g`;
+}
+
+function createRecipeCard(recipe, foods) {
+  const card = createElement("article", { className: "card recipe-card" });
+  const heading = createElement("div", { className: "recipe-card__heading" });
+  heading.append(
+    createElement("div", { className: "recipe-card__identity" }),
+    createElement("strong", { text: `${displayPoints(recipe.rawPointsPerServing)} PP / serving` })
+  );
+  heading.firstElementChild.append(
+    createElement("h3", { text: recipe.name }),
+    createElement("p", { text: `${recipe.servings} serving${recipe.servings === 1 ? "" : "s"} · ${displayPoints(recipe.rawTotalPoints)} PP total` })
+  );
+  const list = createElement("ul", { className: "recipe-ingredient-list" });
+  recipe.ingredients.forEach((ingredient) => {
+    list.append(createElement("li", {
+      text: `${recipeIngredientText(ingredient, foods.find((food) => food.id === ingredient.foodId))} · ${displayPoints(ingredient.rawPoints)} PP`
+    }));
+  });
+  const actions = createElement("div", { className: "form-actions" });
+  const addToDiary = createElement("button", { className: "button button--primary", text: "Add to diary", attributes: { type: "button" } });
+  addToDiary.addEventListener("click", () => {
+    pendingRecipeDiaryId = recipe.id;
+    selectedDiaryDate = localDateString();
+    showingDiaryForm = true;
+    editingDiaryEntryId = undefined;
+    window.location.hash = "diary";
+  });
+  const edit = createElement("button", { className: "button button--secondary", text: "Edit", attributes: { type: "button" } });
+  edit.addEventListener("click", () => {
+    showingRecipeForm = true;
+    editingRecipeId = recipe.id;
+    pendingDeleteRecipeId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(addToDiary, edit);
+  if (pendingDeleteRecipeId === recipe.id) {
+    actions.append(createElement("span", { className: "delete-question", text: "Delete this recipe?" }));
+    const confirm = createElement("button", { className: "button button--danger", text: "Yes, delete", attributes: { type: "button" } });
+    const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      try {
+        await deleteRecipe(recipe.id);
+        recipeNotice = `${recipe.name} deleted.`;
+      } catch (error) {
+        recipeNotice = error.message;
+      }
+      pendingDeleteRecipeId = undefined;
+      await renderCurrentRoute();
+    });
+    cancel.addEventListener("click", () => {
+      pendingDeleteRecipeId = undefined;
+      void renderCurrentRoute();
+    });
+    actions.append(confirm, cancel);
+  } else {
+    const remove = createElement("button", { className: "button button--secondary", text: "Delete", attributes: { type: "button" } });
+    remove.addEventListener("click", () => {
+      pendingDeleteRecipeId = recipe.id;
+      void renderCurrentRoute();
+    });
+    actions.append(remove);
+  }
+  card.append(heading, list, actions);
+  return card;
+}
+
+function createRecipeSearch() {
+  const form = createElement("form", { className: "food-search", attributes: { role: "search" } });
+  const label = createElement("label", { className: "visually-hidden", text: "Search recipes", attributes: { for: "recipe-search" } });
+  const input = createElement("input", { attributes: { id: "recipe-search", type: "search", value: recipeSearchQuery, placeholder: "Search recipes" } });
+  const submit = createElement("button", { className: "button button--primary", text: "Search", attributes: { type: "submit" } });
+  form.append(label, input, submit);
+  if (recipeSearchQuery) {
+    const clear = createElement("button", { className: "button button--secondary", text: "Clear", attributes: { type: "button" } });
+    clear.addEventListener("click", () => {
+      recipeSearchQuery = "";
+      void renderCurrentRoute();
+    });
+    form.append(clear);
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    recipeSearchQuery = input.value;
+    void renderCurrentRoute();
+  });
+  return form;
+}
+
+function renderRecipesScreen(recipes, foods) {
+  const screen = createElement("section", { className: "screen" });
+  const header = createScreenHeader("Recipes", "Build reusable recipes from foods in the shared household database.");
+  const addRecipe = createElement("button", { className: "button button--primary", text: "Create recipe", attributes: { type: "button", disabled: foods.length ? undefined : "" } });
+  addRecipe.addEventListener("click", () => {
+    showingRecipeForm = true;
+    editingRecipeId = undefined;
+    pendingDeleteRecipeId = undefined;
+    void renderCurrentRoute();
+  });
+  header.append(addRecipe);
+  screen.append(header);
+  if (recipeNotice) {
+    screen.append(createElement("p", { className: "notice", text: recipeNotice, attributes: { role: "status" } }));
+    recipeNotice = undefined;
+  }
+  if (showingRecipeForm) {
+    const recipe = editingRecipeId ? recipes.find((candidate) => candidate.id === editingRecipeId) : undefined;
+    screen.append(createRecipeForm(foods, recipe));
+    return screen;
+  }
+  screen.append(createRecipeSearch());
+  const list = createElement("div", { className: "recipe-list" });
+  if (!foods.length) {
+    list.append(createElement("article", { className: "card empty-state", text: "Add foods before creating a recipe." }));
+  } else if (!recipes.length) {
+    list.append(createElement("article", { className: "card empty-state", text: recipeSearchQuery ? "No recipes match this search." : "No recipes yet." }));
+  } else {
+    recipes.forEach((recipe) => list.append(createRecipeCard(recipe, foods)));
+  }
+  screen.append(list);
+  return screen;
+}
+
 function mealLabel(meal) {
   return meal[0].toUpperCase() + meal.slice(1);
 }
@@ -857,6 +1185,7 @@ function createDiaryEntryForm(state, foods, entry) {
   cancel.addEventListener("click", () => {
     showingDiaryForm = false;
     editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = undefined;
     void renderCurrentRoute();
   });
   actions.append(submit, cancel);
@@ -880,6 +1209,7 @@ function createDiaryEntryForm(state, foods, entry) {
       await (entry ? updateDiaryEntry(entry.id, input) : createDiaryEntry(input));
       showingDiaryForm = false;
       editingDiaryEntryId = undefined;
+      pendingRecipeDiaryId = undefined;
       diaryNotice = entry ? "Diary entry updated." : "Food added to diary.";
       await renderCurrentRoute();
     } catch (error) {
@@ -892,7 +1222,115 @@ function createDiaryEntryForm(state, foods, entry) {
   return card;
 }
 
+function createRecipeDiaryEntryForm(state, recipes, entry) {
+  const card = createElement("section", { className: "card form-card diary-form-card" });
+  card.append(createElement("h3", { text: entry ? "Edit recipe diary entry" : "Add recipe to diary" }));
+  const form = createElement("form", { className: "data-form" });
+  const fields = createElement("div", { className: "form-grid" });
+  fields.append(createField({
+    label: "Meal",
+    name: "recipeDiaryMeal",
+    value: entry?.meal ?? "dinner",
+    options: MEALS.map((meal) => ({ value: meal, label: mealLabel(meal) }))
+  }));
+  const searchField = createElement("div", { className: "form-field" });
+  const searchLabel = createElement("label", { text: "Search recipes", attributes: { for: "diary-recipe-search" } });
+  const search = createElement("input", { attributes: { id: "diary-recipe-search", type: "search", placeholder: "Recipe name", autocomplete: "off" } });
+  searchField.append(searchLabel, search);
+  const recipeField = createElement("div", { className: "form-field" });
+  const recipeLabel = createElement("label", { text: "Recipe", attributes: { for: "diary-recipe" } });
+  const recipeSelect = createElement("select", { attributes: { id: "diary-recipe", name: "recipeId", required: "" } });
+  recipeField.append(recipeLabel, recipeSelect);
+  const quantityField = createField({
+    label: "Recipe servings",
+    name: "recipeDiaryQuantity",
+    type: "number",
+    min: "0.1",
+    step: "0.1",
+    value: entry?.quantity ?? "1"
+  });
+  fields.append(searchField, recipeField, quantityField);
+  const preview = createElement("p", { className: "food-calculation", attributes: { role: "status", "aria-live": "polite" } });
+  const quantityInput = quantityField.querySelector("input");
+
+  function selectedRecipe() {
+    return recipes.find((recipe) => recipe.id === recipeSelect.value);
+  }
+
+  function updatePreview() {
+    try {
+      const recipe = selectedRecipe();
+      const quantity = Number(quantityInput.value);
+      preview.textContent = `${quantity} serving${quantity === 1 ? "" : "s"} · ${displayPoints(recipePointsForServings(recipe, quantity))} PP`;
+    } catch {
+      preview.textContent = "Select a recipe and serving quantity to calculate ProPoints.";
+    }
+  }
+
+  function populateRecipes(query, preferredRecipeId) {
+    const normalized = normalizeFoodName(query);
+    const matching = recipes.filter((recipe) =>
+      !normalized || (recipe.normalizedName ?? normalizeFoodName(recipe.name)).includes(normalized)
+    );
+    const wanted = preferredRecipeId ?? recipeSelect.value;
+    recipeSelect.replaceChildren();
+    matching.forEach((recipe) => {
+      recipeSelect.append(createElement("option", { text: recipe.name, attributes: { value: recipe.id } }));
+    });
+    if (matching.some((recipe) => recipe.id === wanted)) recipeSelect.value = wanted;
+    updatePreview();
+  }
+
+  search.addEventListener("input", () => populateRecipes(search.value));
+  recipeSelect.addEventListener("change", updatePreview);
+  quantityInput.addEventListener("input", updatePreview);
+  populateRecipes("", entry?.itemId ?? pendingRecipeDiaryId);
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const submit = createElement("button", { className: "button button--primary", text: entry ? "Save changes" : "Add to diary", attributes: { type: "submit" } });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", () => {
+    showingDiaryForm = false;
+    editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(submit, cancel);
+  form.append(fields, preview, message, actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    try {
+      const values = new FormData(form);
+      const input = {
+        userId: state.currentUser.id,
+        date: selectedDiaryDate,
+        meal: values.get("recipeDiaryMeal"),
+        itemType: "recipe",
+        recipeId: values.get("recipeId"),
+        quantity: numberValue(values, "recipeDiaryQuantity")
+      };
+      await (entry ? updateDiaryEntry(entry.id, input) : createDiaryEntry(input));
+      showingDiaryForm = false;
+      editingDiaryEntryId = undefined;
+      pendingRecipeDiaryId = undefined;
+      diaryNotice = entry ? "Diary entry updated." : "Recipe added to diary.";
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not save recipe diary entry", error);
+      showFormMessage(message, error.message);
+      submit.disabled = false;
+    }
+  });
+  card.append(form);
+  return card;
+}
+
 function diaryQuantityText(entry) {
+  if (entry.itemType === "recipe") {
+    return `${entry.quantity} recipe serving${entry.quantity === 1 ? "" : "s"}`;
+  }
   return entry.unit === "g"
     ? `${entry.grams} g`
     : `${entry.quantity} × ${entry.unit} · ${entry.grams} g`;
@@ -912,6 +1350,7 @@ function createDiaryEntryCard(entry) {
   edit.addEventListener("click", () => {
     showingDiaryForm = true;
     editingDiaryEntryId = entry.id;
+    pendingRecipeDiaryId = entry.itemType === "recipe" ? entry.itemId : undefined;
     pendingDeleteDiaryEntryId = undefined;
     void renderCurrentRoute();
   });
@@ -960,17 +1399,28 @@ function createDiaryEntryCard(entry) {
   return item;
 }
 
-function renderDiaryScreen(state, summary, foods) {
+function renderDiaryScreen(state, summary, foods, recipes) {
   const screen = createElement("section", { className: "screen" });
   const header = createScreenHeader("Diary", `${state.currentUser.name}'s food entries by local calendar date.`);
-  const addEntry = createElement("button", { className: "button button--primary", text: "Add entry", attributes: { type: "button", disabled: foods.length ? undefined : "" } });
+  const headerActions = createElement("div", { className: "screen-header__actions" });
+  const addEntry = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button", disabled: foods.length ? undefined : "" } });
   addEntry.addEventListener("click", () => {
     showingDiaryForm = true;
     editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = undefined;
     pendingDeleteDiaryEntryId = undefined;
     void renderCurrentRoute();
   });
-  header.append(addEntry);
+  const addRecipe = createElement("button", { className: "button button--secondary", text: "Add recipe", attributes: { type: "button", disabled: recipes.length ? undefined : "" } });
+  addRecipe.addEventListener("click", () => {
+    showingDiaryForm = true;
+    editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = recipes[0]?.id;
+    pendingDeleteDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  headerActions.append(addEntry, addRecipe);
+  header.append(headerActions);
   screen.append(header);
 
   const dateControls = createElement("div", { className: "diary-date-controls" });
@@ -987,6 +1437,7 @@ function renderDiaryScreen(state, summary, foods) {
     selectedDiaryDate = dateInput.value;
     showingDiaryForm = false;
     editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = undefined;
     void renderCurrentRoute();
   });
   const today = createElement("button", { className: "button button--secondary", text: "Today", attributes: { type: "button" } });
@@ -1015,7 +1466,10 @@ function renderDiaryScreen(state, summary, foods) {
 
   if (showingDiaryForm) {
     const entry = editingDiaryEntryId ? summary.entries.find((candidate) => candidate.id === editingDiaryEntryId) : undefined;
-    screen.append(createDiaryEntryForm(state, foods, entry));
+    const isRecipe = entry?.itemType === "recipe" || (!entry && pendingRecipeDiaryId);
+    screen.append(isRecipe
+      ? createRecipeDiaryEntryForm(state, recipes, entry)
+      : createDiaryEntryForm(state, foods, entry));
     return screen;
   }
 
@@ -1152,6 +1606,7 @@ function renderWeeklyScreen(state, summary) {
         selectedDiaryDate = day.date;
         showingDiaryForm = false;
         editingDiaryEntryId = undefined;
+        pendingRecipeDiaryId = undefined;
         window.location.hash = "diary";
       });
       card.append(diary);
@@ -1193,18 +1648,26 @@ async function renderScreen(route) {
     screen = renderTodayScreen(state, summary, weekly);
   } else if (route.name === "diary") {
     if (selectedDiaryDate < state.weighIns[0].date) selectedDiaryDate = state.weighIns[0].date;
-    const [summary, foods] = await Promise.all([
+    const [summary, foods, recipes] = await Promise.all([
       getDiarySummary(state.currentUser.id, selectedDiaryDate),
-      searchFoods("")
+      searchFoods(""),
+      listRecipes()
     ]);
     if (sequence !== renderSequence) return;
-    screen = renderDiaryScreen(state, summary, foods);
+    screen = renderDiaryScreen(state, summary, foods, recipes);
   } else if (route.name === "settings") {
     screen = renderSettingsScreen(state);
   } else if (route.name === "foods") {
     const foods = await searchFoods(foodSearchQuery);
     if (sequence !== renderSequence) return;
     screen = renderFoodsScreen(foods);
+  } else if (route.name === "recipes") {
+    const [recipes, foods] = await Promise.all([
+      searchRecipes(recipeSearchQuery),
+      searchFoods("")
+    ]);
+    if (sequence !== renderSequence) return;
+    screen = renderRecipesScreen(recipes, foods);
   } else if (route.name === "progress") {
     const firstWeekStart = weekRange(state.weighIns[0].date).start;
     if (selectedWeekDate < firstWeekStart) selectedWeekDate = state.weighIns[0].date;
@@ -1238,6 +1701,7 @@ async function startApplication() {
     showingUserForm = false;
     showingDiaryForm = false;
     editingDiaryEntryId = undefined;
+    pendingRecipeDiaryId = undefined;
     pendingDeleteDiaryEntryId = undefined;
     await renderCurrentRoute();
   });

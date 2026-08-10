@@ -1,9 +1,19 @@
 import { openDatabase } from "./db.js";
 import {
+  createDiaryEntry,
+  deleteDiaryEntry,
+  duplicateDiaryEntry,
+  getDiarySummary,
+  MEALS,
+  updateDiaryEntry
+} from "./diary.js";
+import {
   createFood,
   deleteFood,
   foodPointsForDefaultServing,
+  foodPointsForGrams,
   foodPointsPer100g,
+  normalizeFoodName,
   searchFoods,
   updateFood
 } from "./foods.js";
@@ -31,6 +41,11 @@ let editingFoodId;
 let foodSearchQuery = "";
 let pendingDeleteFoodId;
 let foodNotice;
+let selectedDiaryDate = localDateString();
+let showingDiaryForm = false;
+let editingDiaryEntryId;
+let pendingDeleteDiaryEntryId;
+let diaryNotice;
 let renderSequence = 0;
 
 function createElement(tagName, options = {}) {
@@ -244,27 +259,60 @@ function createMetric(label, value, detail) {
   return metric;
 }
 
-function renderTodayScreen(state) {
+function renderTodayScreen(state, summary) {
   const { currentUser, weighIns } = state;
   const currentWeighIn = weighIns.at(-1);
   const screen = createElement("section", { className: "screen" });
-  screen.append(createScreenHeader("Today", `${currentUser.name}'s current ProPoints profile.`));
+  screen.append(createScreenHeader("Today", `${currentUser.name} · ${summary.date}`));
 
   const metrics = createElement("div", { className: "metrics-grid" });
   metrics.append(
     createMetric("Current weight", `${currentWeighIn.weightKg.toFixed(1)} kg`, `Recorded ${currentWeighIn.date}`),
     createMetric("Target weight", `${currentUser.targetWeightKg.toFixed(1)} kg`, `${Math.max(0, currentWeighIn.weightKg - currentUser.targetWeightKg).toFixed(1)} kg remaining`),
-    createMetric("Daily allowance", `${currentWeighIn.dailyBudget} PP`, `Minimum ${currentUser.dailyMinimum} PP`),
-    createMetric("Weekly allowance", `${currentUser.weeklyAllowance} PP`, `${weighIns.length} weigh-in${weighIns.length === 1 ? "" : "s"} recorded`)
+    createMetric("Used today", `${displayPoints(summary.usedPoints)} PP`, `${summary.dailyBudget} PP daily budget`),
+    createMetric(
+      summary.remainingPoints >= 0 ? "Remaining today" : "Daily excess",
+      `${displayPoints(Math.abs(summary.remainingPoints))} PP`,
+      summary.remainingPoints >= 0 ? "Available from today's budget" : "Counted against weekly extras"
+    )
   );
   screen.append(metrics);
 
-  const next = createElement("article", { className: "card card--accent" });
-  next.append(
-    createElement("h3", { text: "Profile tracking is ready" }),
-    createElement("p", { text: "Use Settings to record another weigh-in or adjust the target weight. Shared foods and serving sizes are available under Foods." })
+  const week = createElement("article", { className: "card card--accent today-week" });
+  week.append(
+    createElement("h3", { text: "This week" }),
+    createElement("p", { text: `${summary.weekStart} to ${summary.weekEnd}` }),
+    createElement("p", {
+      className: "today-week__value",
+      text: `${displayPoints(summary.weeklyExtrasUsed)} / ${currentUser.weeklyAllowance} PP weekly extras used`
+    }),
+    createElement("p", {
+      text: summary.weeklyExtrasRemaining >= 0
+        ? `${displayPoints(summary.weeklyExtrasRemaining)} PP weekly extras remaining`
+        : `${displayPoints(Math.abs(summary.weeklyExtrasRemaining))} PP beyond weekly extras`
+    })
   );
-  screen.append(next);
+
+  const actions = createElement("div", { className: "today-actions" });
+  const tellAi = createElement("button", {
+    className: "button button--secondary",
+    text: "Tell me what I ate",
+    attributes: { type: "button", disabled: "", title: "AI food entry will be added in a later milestone." }
+  });
+  const addEntry = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button" } });
+  addEntry.addEventListener("click", () => {
+    selectedDiaryDate = summary.date;
+    showingDiaryForm = true;
+    editingDiaryEntryId = undefined;
+    window.location.hash = "diary";
+  });
+  const viewDiary = createElement("button", { className: "button button--secondary", text: "View diary", attributes: { type: "button" } });
+  viewDiary.addEventListener("click", () => {
+    selectedDiaryDate = summary.date;
+    window.location.hash = "diary";
+  });
+  actions.append(tellAi, addEntry, viewDiary);
+  screen.append(week, actions);
   return screen;
 }
 
@@ -374,7 +422,7 @@ function renderSettingsScreen(state) {
 }
 
 function displayPoints(rawPoints) {
-  return roundProPoints(rawPoints, "decimal").toFixed(1);
+  return String(roundProPoints(rawPoints));
 }
 
 function createServingRow(serving = {}, isDefault = false) {
@@ -582,7 +630,7 @@ function createFoodCard(food) {
   const servingList = createElement("ul", { className: "serving-list" });
   food.servings.forEach((serving) => {
     const isDefault = serving.id === food.defaultServingId;
-    const rawPoints = foodPointsPer100g(food) * serving.grams / 100;
+    const rawPoints = foodPointsForGrams(food, serving.grams);
     servingList.append(createElement("li", {
       text: `${serving.description} · ${serving.grams} g · ${displayPoints(rawPoints)} PP${isDefault ? " · default" : ""}`
     }));
@@ -670,6 +718,335 @@ function renderFoodsScreen(foods) {
   return screen;
 }
 
+function mealLabel(meal) {
+  return meal[0].toUpperCase() + meal.slice(1);
+}
+
+function createDiaryEntryForm(state, foods, entry) {
+  const card = createElement("section", { className: "card form-card diary-form-card" });
+  card.append(createElement("h3", { text: entry ? "Edit diary entry" : "Add food to diary" }));
+  const form = createElement("form", { className: "data-form" });
+  const topFields = createElement("div", { className: "form-grid" });
+  topFields.append(createField({
+    label: "Meal",
+    name: "diaryMeal",
+    value: entry?.meal ?? "breakfast",
+    options: MEALS.map((meal) => ({ value: meal, label: mealLabel(meal) }))
+  }));
+
+  const searchField = createElement("div", { className: "form-field" });
+  const searchLabel = createElement("label", { text: "Search foods", attributes: { for: "diary-food-search" } });
+  const search = createElement("input", {
+    attributes: { id: "diary-food-search", type: "search", placeholder: "Name or brand", autocomplete: "off" }
+  });
+  searchField.append(searchLabel, search);
+
+  const foodField = createElement("div", { className: "form-field" });
+  const foodLabel = createElement("label", { text: "Food", attributes: { for: "diary-food" } });
+  const foodSelect = createElement("select", { attributes: { id: "diary-food", name: "foodId", required: "" } });
+  foodField.append(foodLabel, foodSelect);
+
+  const servingField = createElement("div", { className: "form-field" });
+  const servingLabel = createElement("label", { text: "Serving", attributes: { for: "diary-serving" } });
+  const servingSelect = createElement("select", { attributes: { id: "diary-serving", name: "servingId", required: "" } });
+  servingField.append(servingLabel, servingSelect);
+
+  const quantityField = createField({
+    label: "Quantity (servings or grams)",
+    name: "diaryQuantity",
+    type: "number",
+    min: "0.1",
+    step: "0.1",
+    value: entry?.quantity ?? "1"
+  });
+  topFields.append(searchField, foodField, servingField, quantityField);
+
+  const preview = createElement("p", {
+    className: "food-calculation",
+    text: "Select a food and quantity to calculate ProPoints.",
+    attributes: { role: "status", "aria-live": "polite" }
+  });
+  const quantityInput = quantityField.querySelector("input");
+
+  function selectedFood() {
+    return foods.find((food) => food.id === foodSelect.value);
+  }
+
+  function updatePreview() {
+    const food = selectedFood();
+    const quantity = Number(quantityInput.value);
+    if (!food || !Number.isFinite(quantity) || quantity <= 0) {
+      preview.textContent = "Select a food and quantity to calculate ProPoints.";
+      return;
+    }
+    const serving = food.servings.find((candidate) => candidate.id === servingSelect.value);
+    const grams = serving ? serving.grams * quantity : quantity;
+    preview.textContent = `${grams.toFixed(1)} g · ${displayPoints(foodPointsForGrams(food, grams))} PP`;
+  }
+
+  function populateServings(preferredServingId) {
+    const food = selectedFood();
+    servingSelect.replaceChildren();
+    if (!food) {
+      servingSelect.append(createElement("option", { text: "Choose a food first", attributes: { value: "" } }));
+      updatePreview();
+      return;
+    }
+    food.servings.forEach((serving) => {
+      servingSelect.append(createElement("option", {
+        text: `${serving.description} (${serving.grams} g)`,
+        attributes: { value: serving.id }
+      }));
+    });
+    servingSelect.append(createElement("option", { text: "Custom grams", attributes: { value: "__grams__" } }));
+    const wanted = preferredServingId ?? food.defaultServingId;
+    servingSelect.value = [...servingSelect.options].some((option) => option.value === wanted) ? wanted : food.defaultServingId;
+    updatePreview();
+  }
+
+  function populateFoods(query, preferredFoodId) {
+    const normalizedQuery = normalizeFoodName(query);
+    const matchingFoods = foods.filter((food) =>
+      !normalizedQuery
+      || (food.normalizedName ?? normalizeFoodName(food.name)).includes(normalizedQuery)
+      || (food.normalizedBrand ?? normalizeFoodName(food.brand)).includes(normalizedQuery)
+    );
+    const previousFoodId = preferredFoodId ?? foodSelect.value;
+    foodSelect.replaceChildren();
+    if (!matchingFoods.length) {
+      foodSelect.append(createElement("option", { text: "No matching foods", attributes: { value: "" } }));
+      populateServings();
+      return;
+    }
+    matchingFoods.forEach((food) => {
+      foodSelect.append(createElement("option", {
+        text: food.brand ? `${food.name} · ${food.brand}` : food.name,
+        attributes: { value: food.id }
+      }));
+    });
+    if (matchingFoods.some((food) => food.id === previousFoodId)) foodSelect.value = previousFoodId;
+    populateServings(entry && foodSelect.value === entry.itemId ? entry.servingId ?? "__grams__" : undefined);
+  }
+
+  search.addEventListener("input", () => populateFoods(search.value));
+  foodSelect.addEventListener("change", () => populateServings());
+  servingSelect.addEventListener("change", updatePreview);
+  quantityInput.addEventListener("input", updatePreview);
+  populateFoods("", entry?.itemId);
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const submit = createElement("button", {
+    className: "button button--primary",
+    text: entry ? "Save changes" : "Add to diary",
+    attributes: { type: "submit" }
+  });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", () => {
+    showingDiaryForm = false;
+    editingDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(submit, cancel);
+
+  form.append(topFields, preview, message, actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    showFormMessage(message, "Saving diary entry…", "progress");
+    try {
+      const values = new FormData(form);
+      const servingId = values.get("servingId");
+      const quantity = numberValue(values, "diaryQuantity");
+      const input = {
+        userId: state.currentUser.id,
+        date: selectedDiaryDate,
+        meal: values.get("diaryMeal"),
+        foodId: values.get("foodId"),
+        ...(servingId === "__grams__" ? { grams: quantity } : { servingId, quantity })
+      };
+      await (entry ? updateDiaryEntry(entry.id, input) : createDiaryEntry(input));
+      showingDiaryForm = false;
+      editingDiaryEntryId = undefined;
+      diaryNotice = entry ? "Diary entry updated." : "Food added to diary.";
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not save diary entry", error);
+      showFormMessage(message, error.message);
+      submit.disabled = false;
+    }
+  });
+  card.append(form);
+  return card;
+}
+
+function diaryQuantityText(entry) {
+  return entry.unit === "g"
+    ? `${entry.grams} g`
+    : `${entry.quantity} × ${entry.unit} · ${entry.grams} g`;
+}
+
+function createDiaryEntryCard(entry) {
+  const item = createElement("li", { className: "diary-entry" });
+  const details = createElement("div", { className: "diary-entry__details" });
+  details.append(
+    createElement("strong", { text: entry.description }),
+    createElement("span", { text: diaryQuantityText(entry) })
+  );
+  item.append(details, createElement("strong", { className: "diary-entry__points", text: `${displayPoints(entry.rawPoints)} PP` }));
+
+  const actions = createElement("div", { className: "diary-entry__actions" });
+  const edit = createElement("button", { className: "button button--small button--secondary", text: "Edit", attributes: { type: "button" } });
+  edit.addEventListener("click", () => {
+    showingDiaryForm = true;
+    editingDiaryEntryId = entry.id;
+    pendingDeleteDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  const duplicate = createElement("button", { className: "button button--small button--secondary", text: "Duplicate", attributes: { type: "button" } });
+  duplicate.addEventListener("click", async () => {
+    duplicate.disabled = true;
+    try {
+      await duplicateDiaryEntry(entry.id);
+      diaryNotice = "Diary entry duplicated.";
+    } catch (error) {
+      diaryNotice = error.message;
+    }
+    await renderCurrentRoute();
+  });
+  actions.append(edit, duplicate);
+
+  if (pendingDeleteDiaryEntryId === entry.id) {
+    actions.append(createElement("span", { className: "delete-question", text: "Delete this entry?" }));
+    const confirm = createElement("button", { className: "button button--small button--danger", text: "Yes, delete", attributes: { type: "button" } });
+    const cancel = createElement("button", { className: "button button--small button--secondary", text: "Cancel", attributes: { type: "button" } });
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      try {
+        await deleteDiaryEntry(entry.id);
+        diaryNotice = "Diary entry deleted.";
+      } catch (error) {
+        diaryNotice = error.message;
+      }
+      pendingDeleteDiaryEntryId = undefined;
+      await renderCurrentRoute();
+    });
+    cancel.addEventListener("click", () => {
+      pendingDeleteDiaryEntryId = undefined;
+      void renderCurrentRoute();
+    });
+    actions.append(confirm, cancel);
+  } else {
+    const remove = createElement("button", { className: "button button--small button--secondary", text: "Delete", attributes: { type: "button" } });
+    remove.addEventListener("click", () => {
+      pendingDeleteDiaryEntryId = entry.id;
+      void renderCurrentRoute();
+    });
+    actions.append(remove);
+  }
+  item.append(actions);
+  return item;
+}
+
+function renderDiaryScreen(state, summary, foods) {
+  const screen = createElement("section", { className: "screen" });
+  const header = createScreenHeader("Diary", `${state.currentUser.name}'s food entries by local calendar date.`);
+  const addEntry = createElement("button", { className: "button button--primary", text: "Add entry", attributes: { type: "button", disabled: foods.length ? undefined : "" } });
+  addEntry.addEventListener("click", () => {
+    showingDiaryForm = true;
+    editingDiaryEntryId = undefined;
+    pendingDeleteDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  header.append(addEntry);
+  screen.append(header);
+
+  const dateControls = createElement("div", { className: "diary-date-controls" });
+  const dateLabel = createElement("label", { text: "Diary date", attributes: { for: "diary-date" } });
+  const dateInput = createElement("input", {
+    attributes: {
+      id: "diary-date",
+      type: "date",
+      value: selectedDiaryDate,
+      min: state.weighIns[0].date
+    }
+  });
+  dateInput.addEventListener("change", () => {
+    selectedDiaryDate = dateInput.value;
+    showingDiaryForm = false;
+    editingDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  const today = createElement("button", { className: "button button--secondary", text: "Today", attributes: { type: "button" } });
+  today.addEventListener("click", () => {
+    selectedDiaryDate = localDateString();
+    showingDiaryForm = false;
+    editingDiaryEntryId = undefined;
+    void renderCurrentRoute();
+  });
+  dateControls.append(dateLabel, dateInput, today);
+  screen.append(dateControls);
+
+  if (diaryNotice) {
+    screen.append(createElement("p", { className: "notice", text: diaryNotice, attributes: { role: "status" } }));
+    diaryNotice = undefined;
+  }
+
+  const totals = createElement("div", { className: "diary-totals" });
+  totals.append(
+    createMetric("Daily budget", `${summary.dailyBudget} PP`),
+    createMetric("Used", `${displayPoints(summary.usedPoints)} PP`),
+    createMetric(summary.remainingPoints >= 0 ? "Remaining" : "Daily excess", `${displayPoints(Math.abs(summary.remainingPoints))} PP`),
+    createMetric("Weekly extras", `${displayPoints(summary.weeklyExtrasUsed)} / ${state.currentUser.weeklyAllowance} PP`, `${displayPoints(Math.max(0, summary.weeklyExtrasRemaining))} PP remaining`)
+  );
+  screen.append(totals);
+
+  if (showingDiaryForm) {
+    const entry = editingDiaryEntryId ? summary.entries.find((candidate) => candidate.id === editingDiaryEntryId) : undefined;
+    screen.append(createDiaryEntryForm(state, foods, entry));
+    return screen;
+  }
+
+  if (!foods.length) {
+    const emptyFoods = createElement("article", { className: "card empty-state" });
+    emptyFoods.append(
+      createElement("h3", { text: "Add a food first" }),
+      createElement("p", { text: "Diary entries use foods from the shared household database." })
+    );
+    const goToFoods = createElement("button", { className: "button button--primary", text: "Go to Foods", attributes: { type: "button" } });
+    goToFoods.addEventListener("click", () => {
+      showingFoodForm = true;
+      editingFoodId = undefined;
+      window.location.hash = "foods";
+    });
+    emptyFoods.append(goToFoods);
+    screen.append(emptyFoods);
+  }
+
+  const mealGroups = createElement("div", { className: "meal-groups" });
+  MEALS.forEach((meal) => {
+    const group = createElement("section", { className: "card meal-group" });
+    const mealEntries = summary.entries.filter((entry) => entry.meal === meal);
+    const mealTotal = summary.mealTotals[meal];
+    const heading = createElement("div", { className: "meal-group__heading" });
+    heading.append(
+      createElement("h3", { text: mealLabel(meal) }),
+      createElement("strong", { text: `${displayPoints(mealTotal)} PP` })
+    );
+    group.append(heading);
+    if (!mealEntries.length) {
+      group.append(createElement("p", { className: "meal-empty", text: "No entries" }));
+    } else {
+      const list = createElement("ul", { className: "diary-entry-list" });
+      mealEntries.forEach((entry) => list.append(createDiaryEntryCard(entry)));
+      group.append(list);
+    }
+    mealGroups.append(group);
+  });
+  screen.append(mealGroups);
+  return screen;
+}
+
 function renderPlaceholder(route) {
   const screen = createElement("section", { className: "screen" });
   screen.append(createScreenHeader(route.title, route.description));
@@ -692,7 +1069,17 @@ async function renderScreen(route) {
   if (!state.currentUser || showingUserForm) {
     screen = renderSetupScreen(state);
   } else if (route.name === "today") {
-    screen = renderTodayScreen(state);
+    const summary = await getDiarySummary(state.currentUser.id, localDateString());
+    if (sequence !== renderSequence) return;
+    screen = renderTodayScreen(state, summary);
+  } else if (route.name === "diary") {
+    if (selectedDiaryDate < state.weighIns[0].date) selectedDiaryDate = state.weighIns[0].date;
+    const [summary, foods] = await Promise.all([
+      getDiarySummary(state.currentUser.id, selectedDiaryDate),
+      searchFoods("")
+    ]);
+    if (sequence !== renderSequence) return;
+    screen = renderDiaryScreen(state, summary, foods);
   } else if (route.name === "settings") {
     screen = renderSettingsScreen(state);
   } else if (route.name === "foods") {
@@ -717,6 +1104,9 @@ async function startApplication() {
   profileSwitcher.addEventListener("change", async () => {
     await setCurrentUser(profileSwitcher.value);
     showingUserForm = false;
+    showingDiaryForm = false;
+    editingDiaryEntryId = undefined;
+    pendingDeleteDiaryEntryId = undefined;
     await renderCurrentRoute();
   });
   addProfileButton.addEventListener("click", () => {

@@ -1,5 +1,5 @@
 const routes = new Map([
-  ["today", { title: "Today", description: "Your daily ProPoints summary will live here." }],
+  ["today", { title: "Today", description: "Your daily Points summary will live here." }],
   ["diary", { title: "Diary", description: "Review and edit food entries by local calendar date." }],
   ["foods", { title: "Foods", description: "Shared household foods and serving sizes." }],
   ["recipes", { title: "Recipes", description: "Build recipes from saved foods and calculate raw points per serving." }],
@@ -25,7 +25,7 @@ export function createRouter({ onRouteChange }) {
       }
     });
 
-    document.title = `${route.title} · ProPoints Tracker`;
+    document.title = `${route.title} · Points Tracker`;
     onRouteChange({ name: routeName, ...route });
   }
 

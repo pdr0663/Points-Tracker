@@ -1,5 +1,7 @@
-export const DATABASE_NAME = "propoints";
+export const DATABASE_NAME = "points-tracker";
 export const DATABASE_VERSION = 1;
+const LEGACY_DATABASE_NAME = ["pro", "points"].join("");
+const STORE_NAMES = ["users", "weighIns", "foods", "foodAliases", "recipes", "diaryEntries", "settings"];
 
 const migrations = {
   1(database) {
@@ -54,6 +56,58 @@ function transactionCompletion(transaction) {
   });
 }
 
+function openExistingDatabase(name) {
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.open(name);
+    let missing = false;
+    request.addEventListener("upgradeneeded", () => {
+      missing = true;
+      request.transaction.abort();
+    }, { once: true });
+    request.addEventListener("success", () => resolve(request.result), { once: true });
+    request.addEventListener("error", (event) => {
+      if (missing) {
+        event.preventDefault();
+        resolve(undefined);
+      } else {
+        reject(request.error);
+      }
+    }, { once: true });
+  });
+}
+
+async function readAllStores(database) {
+  const transaction = database.transaction(STORE_NAMES, "readonly");
+  const completion = transactionCompletion(transaction);
+  const data = Object.fromEntries(await Promise.all(STORE_NAMES.map(async (storeName) => [
+    storeName,
+    await requestResult(transaction.objectStore(storeName).getAll())
+  ])));
+  await completion;
+  return data;
+}
+
+async function migrateLegacyDatabase(database) {
+  const currentData = await readAllStores(database);
+  if (STORE_NAMES.some((storeName) => currentData[storeName].length)) return;
+
+  const legacyDatabase = await openExistingDatabase(LEGACY_DATABASE_NAME);
+  if (!legacyDatabase) return;
+  try {
+    if (!STORE_NAMES.every((storeName) => legacyDatabase.objectStoreNames.contains(storeName))) return;
+    const legacyData = await readAllStores(legacyDatabase);
+    if (!STORE_NAMES.some((storeName) => legacyData[storeName].length)) return;
+    const transaction = database.transaction(STORE_NAMES, "readwrite");
+    const completion = transactionCompletion(transaction);
+    STORE_NAMES.forEach((storeName) => {
+      legacyData[storeName].forEach((record) => transaction.objectStore(storeName).put(record));
+    });
+    await completion;
+  } finally {
+    legacyDatabase.close();
+  }
+}
+
 export function openDatabase() {
   requireIndexedDB();
 
@@ -73,17 +127,24 @@ export function openDatabase() {
         }
       });
 
-      request.addEventListener("success", () => {
+      request.addEventListener("success", async () => {
         const database = request.result;
-        database.addEventListener("versionchange", () => {
+        try {
+          await migrateLegacyDatabase(database);
+          database.addEventListener("versionchange", () => {
+            database.close();
+            databasePromise = undefined;
+          });
+          resolve(database);
+        } catch (error) {
           database.close();
           databasePromise = undefined;
-        });
-        resolve(database);
+          reject(error);
+        }
       }, { once: true });
 
       request.addEventListener("blocked", () => {
-        console.warn("Close other ProPoints Tracker tabs so the local database can be upgraded.");
+        console.warn("Close other Points Tracker tabs so the local database can be upgraded.");
       });
 
       request.addEventListener("error", () => {

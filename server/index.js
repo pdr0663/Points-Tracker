@@ -84,6 +84,6 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 server.listen(port, () => {
-  console.log(`ProPoints Tracker is available at http://localhost:${port}`);
+  console.log(`Points Tracker is available at http://localhost:${port}`);
 });
 

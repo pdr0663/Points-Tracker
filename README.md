@@ -1,6 +1,6 @@
-# ProPoints Tracker
+# Points Tracker
 
-A lightweight, mobile-first ProPoints tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M7 checkpoint.
+A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M8 checkpoint.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ from the Pages artifact.
 In the repository settings, configure **Pages > Build and deployment > Source**
 to **GitHub Actions**. The application uses relative asset paths so it works at
 both a user site and a repository subpath such as
-`https://example.github.io/propoints-tracker/`.
+`https://example.github.io/points-tracker/`.
 
 GitHub Pages hosts only the static, local-first application. The optional AI
 backend cannot run on Pages and must later be deployed separately. Its URL will
@@ -55,18 +55,19 @@ Implemented milestones:
 
 - M0: responsive application shell, hash router and primary navigation
 - M1: versioned IndexedDB database, stores, indexes, CRUD wrapper, transactions and developer reset
-- M2: raw food ProPoints, fruit/confirmed zero-point handling, display rounding, age and daily allowance calculations
+- M2: raw food Points, fruit/confirmed zero-point handling, display rounding, age and daily allowance calculations
 - M3: first-run household setup, multiple profiles, persistent profile switching, weigh-ins with historical allowance snapshots, and editable target weight
-- M4: shared food creation, editing, named servings, normalized search, calculated ProPoints, persistence, and reference-protected deletion
+- M4: shared food creation, editing, named servings, normalized search, calculated Points, persistence, and reference-protected deletion
 - M5: user-isolated daily diaries, food-entry snapshots, add/edit/delete/duplicate workflows, Today totals, and Monday–Sunday weekly-extra calculations
 - M6: weekly tracking with ordinary-versus-extra point accounting, historical week navigation, daily breakdowns, averages, neutral budget comparisons, and calendar-boundary coverage
 - M7: reusable recipes with explicit ingredients, gram-normalized quantities, named servings, live total/per-serving calculations, fractional diary servings, frozen diary snapshots, and reference-protected deletion
+- M8: goal progress with unclamped numerical and clamped visual percentages, sensible weight milestones, current and completed weigh-in periods, and a responsive SVG weight-history chart
 
 AI workflows intentionally remain placeholders until their assigned milestones.
 
 ## Architecture
 
-The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. `recipes.js` owns ingredient normalization, recipe calculations, search and protected deletion. `diary.js` owns food and recipe snapshots, user/date isolation, daily totals, historical daily budgets and weekly-extra calculations. Screens use those modules through feature-level services as later milestones are added.
+The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. `recipes.js` owns ingredient normalization, recipe calculations, search and protected deletion. `diary.js` owns food and recipe snapshots, user/date isolation, daily totals, historical daily budgets and weekly-extra calculations. `progress.js` owns goal, milestone, weigh-in-period and chart-data calculations. Screens use those modules through feature-level services as later milestones are added.
 
 The development server in `server/index.js` currently serves the static application. Later AI routes will remain optional and will call OpenAI only from the server:
 
@@ -85,11 +86,11 @@ Normal tracking must continue working if the AI API is unavailable.
 
 ## Data storage
 
-Normal application data is stored locally in the browser's IndexedDB database named `propoints`. Clearing browser site data removes it. Backup and restore will be added before the application is used as the authoritative household diary.
+Normal application data is stored locally in the browser's IndexedDB database named `points-tracker`. Clearing browser site data removes it. Backup and restore will be added before the application is used as the authoritative household diary.
 
 The database uses explicit migrations. Future schema changes must add a migration and increase `DATABASE_VERSION`; existing databases must not be deleted as an upgrade mechanism.
 
-For development only, `resetDatabase()` is exported by `public/js/db.js`. It permanently removes the local `propoints` database and should not be exposed as an ordinary production action.
+For development only, `resetDatabase()` is exported by `public/js/db.js`. It permanently removes the local `points-tracker` database and should not be exposed as an ordinary production action.
 
 ## Point rules established for this project
 

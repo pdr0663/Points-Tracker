@@ -728,6 +728,126 @@ select:focus-visible,
   font-weight: 750;
 }
 
+.progress-screen {
+  display: grid;
+  gap: 1rem;
+}
+
+.progress-screen > .screen-header {
+  margin-bottom: 0.25rem;
+}
+
+.progress-goal__metrics,
+.progress-current__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.goal-progress {
+  width: 100%;
+  height: 1.25rem;
+  margin-top: 1rem;
+  accent-color: var(--accent);
+}
+
+.progress-chart-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.weight-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 10rem;
+  margin-top: 0.75rem;
+}
+
+.weight-chart__axis {
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.weight-chart__target {
+  stroke: #a7652d;
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+}
+
+.weight-chart__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.weight-chart__point {
+  fill: white;
+  stroke: var(--accent-strong);
+  stroke-width: 4;
+}
+
+.weight-chart__label {
+  fill: var(--text-muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.milestone-list {
+  display: grid;
+  gap: 0;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.milestone {
+  padding: 0.65rem 0;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.milestone--reached {
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+
+.progress-periods {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.progress-periods > h3 {
+  margin: 0.5rem 0 0;
+}
+
+.progress-period__weight {
+  margin: 0.45rem 0 0;
+  color: var(--accent-strong) !important;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.progress-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem 1rem;
+  margin: 1rem 0 0;
+}
+
+.progress-details dt {
+  color: var(--text-muted);
+}
+
+.progress-details dd {
+  margin: 0;
+  font-weight: 750;
+  text-align: right;
+}
+
 .status-list {
   display: grid;
   gap: 0.75rem;
@@ -838,6 +958,14 @@ select:focus-visible,
 
   .weekly-days {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .progress-goal__metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .progress-current__metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .recipe-ingredient-row {

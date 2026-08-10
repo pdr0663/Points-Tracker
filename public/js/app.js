@@ -20,7 +20,8 @@ import {
   searchFoods,
   updateFood
 } from "./foods.js";
-import { roundProPoints } from "./points.js";
+import { roundPoints } from "./points.js";
+import { createWeightChartModel, getProgressSummary } from "./progress.js";
 import {
   calculateRecipe,
   createRecipe,
@@ -59,6 +60,7 @@ let editingDiaryEntryId;
 let pendingDeleteDiaryEntryId;
 let diaryNotice;
 let selectedWeekDate = localDateString();
+let progressView = "overview";
 let showingRecipeForm = false;
 let editingRecipeId;
 let pendingDeleteRecipeId;
@@ -258,7 +260,7 @@ function renderSetupScreen(state) {
   const screen = createElement("section", { className: "screen" });
   screen.append(
     createScreenHeader(
-      state.users.length ? "Add household profile" : "Set up ProPoints",
+      state.users.length ? "Add household profile" : "Set up Points",
       state.users.length
         ? "Create another independent profile while keeping foods and recipes shared."
         : "Create the first household profile and initial weigh-in."
@@ -336,6 +338,7 @@ function renderTodayScreen(state, summary, weekly) {
   const viewWeek = createElement("button", { className: "button button--secondary", text: "View week", attributes: { type: "button" } });
   viewWeek.addEventListener("click", () => {
     selectedWeekDate = summary.date;
+    progressView = "weekly";
     window.location.hash = "progress";
   });
   actions.append(tellAi, addEntry, viewDiary, viewWeek);
@@ -449,7 +452,7 @@ function renderSettingsScreen(state) {
 }
 
 function displayPoints(rawPoints) {
-  return String(roundProPoints(rawPoints));
+  return String(roundPoints(rawPoints));
 }
 
 function createServingRow(serving = {}, isDefault = false) {
@@ -562,7 +565,7 @@ function createFoodForm(food) {
 
   const calculation = createElement("p", {
     className: "food-calculation",
-    text: "Enter nutrition and a default serving to calculate ProPoints.",
+    text: "Enter nutrition and a default serving to calculate Points.",
     attributes: { role: "status", "aria-live": "polite" }
   });
   function updateCalculation() {
@@ -573,7 +576,7 @@ function createFoodForm(food) {
       const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing };
       calculation.textContent = `${displayPoints(foodPointsPer100g(preview))} PP per 100 g · ${displayPoints(foodPointsForDefaultServing(preview))} PP per ${defaultServing.description || "default serving"}`;
     } catch {
-      calculation.textContent = "Enter nutrition and a default serving to calculate ProPoints.";
+      calculation.textContent = "Enter nutrition and a default serving to calculate Points.";
     }
   }
   form.addEventListener("input", updateCalculation);
@@ -864,7 +867,7 @@ function createRecipeForm(foods, recipe) {
   const ingredientRows = createElement("div", { className: "recipe-ingredient-rows" });
   const total = createElement("p", {
     className: "food-calculation",
-    text: "Add ingredients to calculate recipe ProPoints.",
+    text: "Add ingredients to calculate recipe Points.",
     attributes: { role: "status", "aria-live": "polite" }
   });
 
@@ -879,7 +882,7 @@ function createRecipeForm(foods, recipe) {
       [...ingredientRows.children].forEach((row) => {
         row.querySelector("[data-ingredient-points]").textContent = "— PP";
       });
-      total.textContent = "Add complete ingredient quantities to calculate recipe ProPoints.";
+      total.textContent = "Add complete ingredient quantities to calculate recipe Points.";
     }
   }
 
@@ -1103,7 +1106,7 @@ function createDiaryEntryForm(state, foods, entry) {
 
   const preview = createElement("p", {
     className: "food-calculation",
-    text: "Select a food and quantity to calculate ProPoints.",
+    text: "Select a food and quantity to calculate Points.",
     attributes: { role: "status", "aria-live": "polite" }
   });
   const quantityInput = quantityField.querySelector("input");
@@ -1116,7 +1119,7 @@ function createDiaryEntryForm(state, foods, entry) {
     const food = selectedFood();
     const quantity = Number(quantityInput.value);
     if (!food || !Number.isFinite(quantity) || quantity <= 0) {
-      preview.textContent = "Select a food and quantity to calculate ProPoints.";
+      preview.textContent = "Select a food and quantity to calculate Points.";
       return;
     }
     const serving = food.servings.find((candidate) => candidate.id === servingSelect.value);
@@ -1263,7 +1266,7 @@ function createRecipeDiaryEntryForm(state, recipes, entry) {
       const quantity = Number(quantityInput.value);
       preview.textContent = `${quantity} serving${quantity === 1 ? "" : "s"} · ${displayPoints(recipePointsForServings(recipe, quantity))} PP`;
     } catch {
-      preview.textContent = "Select a recipe and serving quantity to calculate ProPoints.";
+      preview.textContent = "Select a recipe and serving quantity to calculate Points.";
     }
   }
 
@@ -1534,7 +1537,16 @@ function weeklyDayStatus(day, asOfDate) {
 
 function renderWeeklyScreen(state, summary) {
   const screen = createElement("section", { className: "screen weekly-screen" });
-  screen.append(createScreenHeader("Weekly tracking", `${state.currentUser.name}'s Monday–Sunday summary.`));
+  const header = createScreenHeader("Weekly tracking", `${state.currentUser.name}'s Monday–Sunday summary.`);
+  const headerActions = createElement("div", { className: "screen-header__actions" });
+  const overview = createElement("button", { className: "button button--secondary", text: "Goal & weight overview", attributes: { type: "button" } });
+  overview.addEventListener("click", () => {
+    progressView = "overview";
+    void renderCurrentRoute();
+  });
+  headerActions.append(overview);
+  header.append(headerActions);
+  screen.append(header);
 
   const navigation = createElement("div", { className: "week-navigation" });
   const previous = createElement("button", {
@@ -1617,6 +1629,145 @@ function renderWeeklyScreen(state, summary) {
   return screen;
 }
 
+function formatWeight(value, { signed = false } = {}) {
+  const prefix = signed && value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(1)} kg`;
+}
+
+function createWeightChart(weighIns, targetWeightKg) {
+  const model = createWeightChartModel(weighIns, targetWeightKg);
+  const width = 700;
+  const height = 280;
+  const left = 58;
+  const right = 18;
+  const top = 22;
+  const bottom = 42;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const x = (value) => left + value * plotWidth;
+  const y = (value) => top + value * plotHeight;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "weight-chart");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `Weight history from ${weighIns[0].date} to ${weighIns.at(-1).date}, with a ${targetWeightKg.toFixed(1)} kilogram target.`);
+
+  const addSvg = (tagName, attributes = {}, text) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tagName);
+    Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+    if (text !== undefined) element.textContent = text;
+    svg.append(element);
+    return element;
+  };
+
+  addSvg("line", { class: "weight-chart__axis", x1: left, y1: top, x2: left, y2: height - bottom });
+  addSvg("line", { class: "weight-chart__axis", x1: left, y1: height - bottom, x2: width - right, y2: height - bottom });
+  addSvg("line", { class: "weight-chart__target", x1: left, y1: y(model.targetY), x2: width - right, y2: y(model.targetY) });
+  addSvg("text", { class: "weight-chart__label", x: left + 6, y: y(model.targetY) - 7 }, `Target ${targetWeightKg.toFixed(1)} kg`);
+  addSvg("text", { class: "weight-chart__label", x: 4, y: top + 5 }, model.maximumWeightKg.toFixed(1));
+  addSvg("text", { class: "weight-chart__label", x: 4, y: height - bottom + 4 }, model.minimumWeightKg.toFixed(1));
+  addSvg("polyline", { class: "weight-chart__line", points: model.points.map((point) => `${x(point.x)},${y(point.y)}`).join(" ") });
+  model.points.forEach((point) => {
+    const circle = addSvg("circle", { class: "weight-chart__point", cx: x(point.x), cy: y(point.y), r: 5 });
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${point.date}: ${point.weightKg.toFixed(1)} kg`;
+    circle.append(title);
+  });
+  const first = model.points[0];
+  const last = model.points.at(-1);
+  addSvg("text", { class: "weight-chart__label", x: x(first.x), y: height - 16, "text-anchor": "start" }, first.date);
+  if (last !== first) addSvg("text", { class: "weight-chart__label", x: x(last.x), y: height - 16, "text-anchor": "end" }, last.date);
+  return svg;
+}
+
+function createPeriodCard(period) {
+  const card = createElement("article", { className: "card progress-period" });
+  card.append(
+    createElement("h3", { text: `${period.startDate} to ${period.endDate}` }),
+    createElement("p", { className: "progress-period__weight", text: `${formatWeight(period.startWeightKg)} → ${formatWeight(period.endWeightKg)}` })
+  );
+  const details = createElement("dl", { className: "progress-details" });
+  [
+    ["Weight change", formatWeight(period.weightChangeKg, { signed: true })],
+    ["Average points/day", `${displayPoints(period.averagePointsPerDay)} PP`],
+    ["Daily allowance", `${period.dailyAllowance} PP`],
+    ["Weekly extras used", `${displayPoints(period.weeklyExtrasConsumed)} PP`]
+  ].forEach(([term, value]) => details.append(createElement("dt", { text: term }), createElement("dd", { text: value })));
+  card.append(details);
+  return card;
+}
+
+function renderProgressScreen(state, summary) {
+  const screen = createElement("section", { className: "screen progress-screen" });
+  const header = createScreenHeader("Progress", `${state.currentUser.name}'s weight, goal, and weigh-in periods.`);
+  const headerActions = createElement("div", { className: "screen-header__actions" });
+  const weekly = createElement("button", { className: "button button--secondary", text: "Weekly point detail", attributes: { type: "button" } });
+  weekly.addEventListener("click", () => {
+    selectedWeekDate = localDateString();
+    progressView = "weekly";
+    void renderCurrentRoute();
+  });
+  headerActions.append(weekly);
+  header.append(headerActions);
+  screen.append(header);
+
+  const goal = createElement("article", { className: "card progress-goal" });
+  goal.append(createElement("h3", { text: "Goal progress" }));
+  const goalMetrics = createElement("div", { className: "progress-goal__metrics" });
+  goalMetrics.append(
+    createMetric("Start", formatWeight(summary.goal.startWeightKg)),
+    createMetric("Current", formatWeight(summary.goal.currentWeightKg)),
+    createMetric("Goal", formatWeight(summary.goal.targetWeightKg)),
+    createMetric("Lost", formatWeight(summary.goal.weightLostKg, { signed: true })),
+    createMetric("Remaining", formatWeight(summary.goal.weightRemainingKg, { signed: true })),
+    createMetric("Progress", `${Math.round(summary.goal.percentComplete)}%`, "Visual indicator is limited to 0–100%")
+  );
+  const progress = createElement("progress", { className: "goal-progress", attributes: { max: "100", value: String(summary.goal.visualPercentComplete), "aria-label": "Goal progress" } });
+  goal.append(goalMetrics, progress);
+  screen.append(goal);
+
+  const chart = createElement("article", { className: "card progress-chart-card" });
+  chart.append(createElement("h3", { text: "Weight history" }), createWeightChart(summary.weighIns, summary.goal.targetWeightKg));
+  screen.append(chart);
+
+  const milestones = createElement("article", { className: "card" });
+  milestones.append(createElement("h3", { text: "Milestones" }));
+  const milestoneList = createElement("ul", { className: "milestone-list" });
+  const losingWeight = summary.goal.targetWeightKg < summary.goal.startWeightKg;
+  summary.milestones.forEach((weight) => {
+    const reached = losingWeight ? summary.goal.currentWeightKg <= weight : summary.goal.currentWeightKg >= weight;
+    milestoneList.append(createElement("li", {
+      className: reached ? "milestone milestone--reached" : "milestone",
+      text: `${reached ? "Reached" : "Next"} · ${formatWeight(weight)}${weight === summary.goal.targetWeightKg ? " · Goal" : ""}`
+    }));
+  });
+  milestones.append(milestoneList);
+  screen.append(milestones);
+
+  const current = summary.currentPeriod;
+  const currentCard = createElement("article", { className: "card progress-current" });
+  currentCard.append(createElement("h3", { text: "Current period" }), createElement("p", { text: `${current.startDate} to next weigh-in` }));
+  const currentMetrics = createElement("div", { className: "progress-current__metrics" });
+  currentMetrics.append(
+    createMetric("Starting weight", formatWeight(current.startWeightKg)),
+    createMetric("Daily allowance", `${current.dailyAllowance} PP`),
+    createMetric("Points so far", `${displayPoints(current.pointsConsumed)} / ${displayPoints(current.pointsBudget)} PP`, `${current.dayCount} calendar day${current.dayCount === 1 ? "" : "s"}`),
+    createMetric("Weekly extras", `${displayPoints(current.weeklyExtrasConsumed)} / ${state.currentUser.weeklyAllowance} PP`)
+  );
+  currentCard.append(currentMetrics);
+  screen.append(currentCard);
+
+  const history = createElement("section", { className: "progress-periods", attributes: { "aria-labelledby": "previous-periods-heading" } });
+  history.append(createElement("h3", { text: "Previous periods", attributes: { id: "previous-periods-heading" } }));
+  if (!summary.completedPeriods.length) {
+    history.append(createElement("article", { className: "card empty-state", text: "A completed period will appear after the next weigh-in." }));
+  } else {
+    summary.completedPeriods.forEach((period) => history.append(createPeriodCard(period)));
+  }
+  screen.append(history);
+  return screen;
+}
+
 function renderPlaceholder(route) {
   const screen = createElement("section", { className: "screen" });
   screen.append(createScreenHeader(route.title, route.description));
@@ -1669,18 +1820,24 @@ async function renderScreen(route) {
     if (sequence !== renderSequence) return;
     screen = renderRecipesScreen(recipes, foods);
   } else if (route.name === "progress") {
-    const firstWeekStart = weekRange(state.weighIns[0].date).start;
-    if (selectedWeekDate < firstWeekStart) selectedWeekDate = state.weighIns[0].date;
-    const selectedRange = weekRange(selectedWeekDate);
-    const today = localDateString();
-    const asOfDate = today < selectedRange.start
-      ? selectedRange.start
-      : today > selectedRange.end
-        ? selectedRange.end
-        : today;
-    const weekly = await getWeeklySummary(state.currentUser.id, selectedWeekDate, { asOfDate });
-    if (sequence !== renderSequence) return;
-    screen = renderWeeklyScreen(state, weekly);
+    if (progressView === "overview") {
+      const progress = await getProgressSummary(state.currentUser.id, localDateString());
+      if (sequence !== renderSequence) return;
+      screen = renderProgressScreen(state, progress);
+    } else {
+      const firstWeekStart = weekRange(state.weighIns[0].date).start;
+      if (selectedWeekDate < firstWeekStart) selectedWeekDate = state.weighIns[0].date;
+      const selectedRange = weekRange(selectedWeekDate);
+      const today = localDateString();
+      const asOfDate = today < selectedRange.start
+        ? selectedRange.start
+        : today > selectedRange.end
+          ? selectedRange.end
+          : today;
+      const weekly = await getWeeklySummary(state.currentUser.id, selectedWeekDate, { asOfDate });
+      if (sequence !== renderSequence) return;
+      screen = renderWeeklyScreen(state, weekly);
+    }
   } else {
     screen = renderPlaceholder(route);
   }

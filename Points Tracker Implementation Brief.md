@@ -1,8 +1,8 @@
-# ProPoints Tracker — Codex Implementation Brief
+# Points Tracker — Codex Implementation Brief
 
 ## 1. Objective
 
-Implement the ProPoints Tracker described in the functional specification as a small, maintainable, mobile-first web application.
+Implement the Points Tracker described in the functional specification as a small, maintainable, mobile-first web application.
 
 The application must:
 
@@ -14,7 +14,7 @@ The application must:
 * provide AI-assisted meal, recipe, voice, and nutrition-label input
 * use a server-side OpenAI integration
 * never expose the OpenAI API key to browser code
-* keep all ProPoints calculations deterministic and local
+* keep all Points calculations deterministic and local
 * require human confirmation before saving AI-interpreted information
 
 The guiding architecture is:
@@ -47,7 +47,7 @@ The implementation sequence is:
 ```text
 M0  Project shell
 M1  Data layer
-M2  ProPoints engine
+M2  Points engine
 M3  Users and weigh-ins
 M4  Foods
 M5  Diary and Today screen
@@ -72,7 +72,7 @@ Do not begin a later milestone until the previous milestone's acceptance tests p
 Use the following structure unless there is a strong implementation reason to change it:
 
 ```text
-propoints/
+points-tracker/
 │
 ├── README.md
 ├── package.json
@@ -135,7 +135,7 @@ Use ES modules.
 Prefer:
 
 ```javascript
-import { calculateProPoints } from "./points.js";
+import { calculatePoints } from "./points.js";
 ```
 
 rather than globals.
@@ -156,7 +156,7 @@ Avoid:
 * direct IndexedDB access from UI components
 * hidden global state
 * business logic inside HTML
-* AI-generated ProPoints calculations
+* AI-generated Points calculations
 
 Business logic and presentation logic must remain separate.
 
@@ -339,7 +339,7 @@ schemaVersion
 Database name:
 
 ```text
-propoints
+points-tracker
 ```
 
 Initial schema version:
@@ -485,7 +485,7 @@ Automated or manual tests demonstrate:
 
 ---
 
-# 9. Milestone M2 — ProPoints Calculation Engine
+# 9. Milestone M2 — Points Calculation Engine
 
 Create `points.js`.
 
@@ -496,7 +496,7 @@ This module must have no UI or database dependencies.
 Implement:
 
 ```javascript
-export function calculateRawProPoints({
+export function calculateRawPoints({
     protein,
     carbohydrate,
     fat,
@@ -514,7 +514,7 @@ export function calculateRawProPoints({
 Implement display rounding separately:
 
 ```javascript
-export function roundProPoints(rawPoints, method = "nearest") {
+export function roundPoints(rawPoints, method = "nearest") {
     ...
 }
 ```
@@ -665,7 +665,7 @@ Fibre /100g
 Serving descriptions
 ```
 
-Show automatically calculated ProPoints per:
+Show automatically calculated Points per:
 
 ```text
 100 g
@@ -982,7 +982,7 @@ Export one JSON object:
 
 ```json
 {
-  "format": "propoints-backup",
+  "format": "points-tracker-backup",
   "version": 1,
   "exportedAt": "...",
   "data": {
@@ -1000,7 +1000,7 @@ Export one JSON object:
 Filename:
 
 ```text
-propoints-backup-YYYY-MM-DD.json
+points-tracker-backup-YYYY-MM-DD.json
 ```
 
 ## Import
@@ -1114,7 +1114,7 @@ Canonical AI response:
 }
 ```
 
-The AI must not be asked to calculate ProPoints.
+The AI must not be asked to calculate Points.
 
 ## Recipe Schema
 
@@ -1451,8 +1451,8 @@ All calculations must ultimately flow through central functions.
 Required functions should include:
 
 ```javascript
-calculateRawProPoints()
-roundProPoints()
+calculateRawPoints()
+roundPoints()
 calculateFoodPoints()
 calculateRecipePoints()
 calculateDiaryEntryPoints()
@@ -1838,7 +1838,7 @@ Version 1 is complete when all of the following work:
 ✓ Calculate daily allowance
 ✓ Record weigh-ins
 ✓ Create foods
-✓ Calculate ProPoints
+✓ Calculate Points
 ✓ Add foods to diary
 ✓ Track daily allowance
 ✓ Track weekly extras
@@ -1874,7 +1874,7 @@ When implementing this repository:
 6. Do not continue to a later milestone if current tests fail.
 7. Preserve backward compatibility with existing IndexedDB data when changing schemas.
 8. Use schema migrations rather than deleting databases.
-9. Do not invent undocumented ProPoints rules.
+9. Do not invent undocumented Points rules.
 10. If a business-rule ambiguity is encountered, isolate it behind configuration rather than hard-coding a guess.
 11. Keep AI optional.
 12. Never allow an AI response to become authoritative nutritional or points data without validation and confirmation.
@@ -1896,7 +1896,7 @@ Specifically:
 4. Implement IndexedDB creation and CRUD wrapper.
 5. Implement the complete deterministic points module.
 6. Write unit tests for:
-   - food ProPoints
+   - food Points
    - rounding
    - male allowance
    - female allowance

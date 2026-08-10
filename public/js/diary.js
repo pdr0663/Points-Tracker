@@ -1,6 +1,6 @@
 import { add, get, queryIndex, put, remove } from "./db.js";
 import { foodPointsForGrams } from "./foods.js";
-import { roundProPoints } from "./points.js";
+import { roundPoints } from "./points.js";
 import { recipePointsForServings } from "./recipes.js";
 import { listWeighIns } from "./users.js";
 
@@ -120,7 +120,7 @@ async function buildEntry(input, existing, options) {
     date,
     meal,
     ...item,
-    displayPoints: roundProPoints(item.rawPoints),
+    displayPoints: roundPoints(item.rawPoints),
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp
   };

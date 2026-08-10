@@ -1,5 +1,5 @@
 import { add, get, getAll, put, runTransaction } from "./db.js";
-import { calculateRawProPoints } from "./points.js";
+import { calculateRawPoints } from "./points.js";
 
 function requestResult(request) {
   return new Promise((resolve, reject) => {
@@ -94,7 +94,7 @@ function validateFood(input, servingIdFactory) {
 }
 
 export function foodPointsPer100g(food) {
-  return calculateRawProPoints(food.nutritionPer100g);
+  return calculateRawPoints(food.nutritionPer100g);
 }
 
 export function foodPointsForGrams(food, grams) {

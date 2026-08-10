@@ -13,6 +13,39 @@ import {
   resetDatabase
 } from "../public/js/db.js";
 
+const previousDatabaseName = ["pro", "points"].join("");
+
+function deleteNamedDatabase(name) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.addEventListener("success", () => resolve(), { once: true });
+    request.addEventListener("error", () => reject(request.error), { once: true });
+  });
+}
+
+function createPreviousDatabase(user) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(previousDatabaseName, 1);
+    request.addEventListener("upgradeneeded", () => {
+      ["users", "weighIns", "foods", "foodAliases", "recipes", "diaryEntries"].forEach((name) => {
+        request.result.createObjectStore(name, { keyPath: "id" });
+      });
+      request.result.createObjectStore("settings", { keyPath: "key" });
+    }, { once: true });
+    request.addEventListener("success", () => {
+      const database = request.result;
+      const transaction = database.transaction("users", "readwrite");
+      transaction.objectStore("users").add(user);
+      transaction.addEventListener("complete", () => {
+        database.close();
+        resolve();
+      }, { once: true });
+      transaction.addEventListener("error", () => reject(transaction.error), { once: true });
+    }, { once: true });
+    request.addEventListener("error", () => reject(request.error), { once: true });
+  });
+}
+
 test("IndexedDB migration creates the complete initial schema", async () => {
   await resetDatabase();
   const database = await openDatabase();
@@ -58,3 +91,15 @@ test("the developer reset removes data and allows a clean recreation", async () 
   assert.deepEqual(await getAll("settings"), []);
 });
 
+test("the renamed database imports existing local records once", async () => {
+  const existingUser = { id: "user-existing", name: "Existing User" };
+  await resetDatabase();
+  await deleteNamedDatabase(previousDatabaseName);
+  await createPreviousDatabase(existingUser);
+
+  await openDatabase();
+  assert.deepEqual(await get("users", existingUser.id), existingUser);
+
+  await resetDatabase();
+  await deleteNamedDatabase(previousDatabaseName);
+});

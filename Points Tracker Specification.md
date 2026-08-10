@@ -1,12 +1,12 @@
-# ProPoints Tracker — Software Implementation Specification
+# Points Tracker — Software Implementation Specification
 
 ## 1. Purpose
 
-Build a lightweight, mobile-first web application for two household users to track food intake using the historical Weight Watchers ProPoints methodology.
+Build a lightweight, mobile-first web application for two household users to track food intake using the historical Weight Watchers Points methodology.
 
 The application must support:
 
-* daily and weekly ProPoints budgeting
+* daily and weekly Points budgeting
 * food logging
 * food database management
 * recipes
@@ -25,7 +25,7 @@ The core principle is:
 
 **AI interprets; deterministic code calculates; the user confirms.**
 
-AI must never be the authoritative calculator for ProPoints.
+AI must never be the authoritative calculator for Points.
 
 ---
 
@@ -49,7 +49,7 @@ Each user has independent:
 * personal details
 * current weight
 * target weight
-* daily ProPoints budget
+* daily Points budget
 * food diary
 * weigh-ins
 * progress history
@@ -111,9 +111,9 @@ The architecture should make it possible to deploy the backend using a low-cost 
 
 ---
 
-# 4. Core ProPoints Calculation
+# 4. Core Points Calculation
 
-## 4.1 Food ProPoints formula
+## 4.1 Food Points formula
 
 For a food containing:
 
@@ -122,7 +122,7 @@ For a food containing:
 * fat `F` grams
 * fibre `Fi` grams
 
-calculate raw ProPoints as:
+calculate raw Points as:
 
 ```text
 rawPoints =
@@ -137,7 +137,7 @@ Implement this calculation centrally.
 Example JavaScript API:
 
 ```javascript
-function calculateProPoints({
+function calculatePoints({
     protein,
     carbohydrate,
     fat,
@@ -152,13 +152,13 @@ function calculateProPoints({
 }
 ```
 
-Do not allow AI responses to provide an authoritative ProPoints value.
+Do not allow AI responses to provide an authoritative Points value.
 
 If AI supplies a point value, ignore it and recalculate locally.
 
 ## 4.2 Rounding
 
-Store raw ProPoints internally as a decimal.
+Store raw Points internally as a decimal.
 
 The display rounding rule must be configurable.
 
@@ -172,9 +172,9 @@ However, preserve the raw value so that a later change in rounding rules does no
 
 ---
 
-# 5. Daily ProPoints Allowance
+# 5. Daily Points Allowance
 
-Use the reconstructed historical ProPoints/PointsPlus allowance calculation.
+Use the reconstructed historical Points/PointsPlus allowance calculation.
 
 Convert internally:
 
@@ -209,13 +209,13 @@ The minimum allowance must be configurable.
 Default:
 
 ```text
-26 ProPoints/day
+26 Points/day
 ```
 
 Also support:
 
 ```text
-29 ProPoints/day
+29 Points/day
 ```
 
 for users wishing to emulate the earlier version of the system.
@@ -240,7 +240,7 @@ Each user receives a weekly discretionary allowance.
 Default:
 
 ```text
-49 ProPoints/week
+49 Points/week
 ```
 
 This should remain separate from the normal daily budget.
@@ -445,7 +445,7 @@ It must display:
 * current date
 * current weight
 * target weight summary
-* daily ProPoints allowance
+* daily Points allowance
 * points consumed today
 * points remaining today
 * weekly extra points used
@@ -530,7 +530,7 @@ Each recipe contains:
 
 The recipe engine must:
 
-1. calculate ProPoints for every ingredient
+1. calculate Points for every ingredient
 2. sum ingredient points
 3. calculate total recipe points
 4. divide by number of servings
@@ -1019,7 +1019,7 @@ Export the complete application dataset as JSON.
 Suggested filename:
 
 ```text
-propoints-backup-YYYY-MM-DD.json
+points-tracker-backup-YYYY-MM-DD.json
 ```
 
 The backup must contain:
@@ -1191,7 +1191,7 @@ Offline-capable functions include:
 * view diary
 * add known food
 * edit diary
-* calculate ProPoints
+* calculate Points
 * recipes using known ingredients
 * weigh-in
 * progress screens
@@ -1288,7 +1288,7 @@ On first launch:
    * height
    * current weight
    * target weight
-3. select ProPoints minimum:
+3. select Points minimum:
 
    * default 26
    * optional 29
@@ -1358,7 +1358,7 @@ Implement:
 
 1. IndexedDB
 2. household users
-3. ProPoints calculation
+3. Points calculation
 4. allowance calculation
 5. foods
 6. diary
@@ -1416,7 +1416,7 @@ Implement:
 
 The implementation should pass at least the following tests.
 
-## 44.1 ProPoints
+## 44.1 Points
 
 Given known nutritional values, the application produces the correct value using:
 

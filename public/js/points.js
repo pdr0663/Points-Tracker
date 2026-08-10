@@ -48,7 +48,7 @@ export function calculateAgeOnDate(dateOfBirth, date) {
   return onDate.year - birth.year - (birthdayHasOccurred ? 0 : 1);
 }
 
-export function calculateRawProPoints({
+export function calculateRawPoints({
   protein,
   carbohydrate,
   fat,
@@ -78,7 +78,7 @@ export function calculateRawProPoints({
   ) / 175;
 }
 
-export function roundProPoints(rawPoints, method = "nearest") {
+export function roundPoints(rawPoints, method = "nearest") {
   requireFiniteNumber(rawPoints, "rawPoints");
 
   if (method === "nearest") {

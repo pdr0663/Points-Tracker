@@ -1,19 +1,15 @@
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --background: #fff8ed;
+  --background: #f4f2eb;
   --surface: #ffffff;
-  --surface-muted: #f3edff;
-  --surface-highlight: #fff0c7;
-  --text: #302641;
-  --text-muted: #665d75;
-  --accent: #7c3aed;
-  --accent-strong: #5b21b6;
-  --border: #ddd2ee;
-  --focus: #c2410c;
-  --danger: #b42318;
-  --target: #d97706;
-  --shadow: 0 12px 32px rgb(91 33 182 / 11%);
+  --surface-muted: #e6eeeb;
+  --text: #18302c;
+  --text-muted: #60736f;
+  --accent: #315f58;
+  --accent-strong: #234b45;
+  --border: #cfdbd7;
+  --shadow: 0 12px 32px rgb(35 75 69 / 8%);
 }
 
 * {
@@ -30,8 +26,7 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(circle at top right, rgb(255 179 190 / 42%), transparent 26rem),
-    radial-gradient(circle at top left, rgb(255 220 122 / 30%), transparent 22rem),
+    radial-gradient(circle at top right, rgb(176 205 194 / 35%), transparent 25rem),
     var(--background);
 }
 
@@ -48,7 +43,7 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 3px solid #df8f48;
   outline-offset: 3px;
 }
 
@@ -71,7 +66,7 @@ select:focus-visible,
 .app-header {
   padding: 1rem;
   color: white;
-  background: linear-gradient(135deg, var(--accent-strong), var(--accent) 62%, #db2777);
+  background: var(--accent);
 }
 
 .app-header__inner {
@@ -191,7 +186,7 @@ select:focus-visible,
 }
 
 .card--accent {
-  background: var(--surface-highlight);
+  background: var(--surface-muted);
 }
 
 .card p:last-child {
@@ -248,7 +243,7 @@ select:focus-visible,
 }
 
 .form-message[data-type="error"] {
-  color: var(--danger);
+  color: #8a2f27;
 }
 
 .form-message[data-type="success"] {
@@ -287,7 +282,7 @@ select:focus-visible,
 }
 
 .backup-file-label:focus-within {
-  outline: 3px solid var(--focus);
+  outline: 3px solid #df8f48;
   outline-offset: 3px;
 }
 
@@ -360,7 +355,7 @@ select:focus-visible,
 
 .button--danger {
   color: white;
-  background: var(--danger);
+  background: #8a2f27;
 }
 
 .button:disabled {
@@ -489,7 +484,7 @@ select:focus-visible,
 }
 
 .delete-question {
-  color: var(--danger);
+  color: #8a2f27;
   font-weight: 700;
 }
 
@@ -849,7 +844,7 @@ select:focus-visible,
 }
 
 .weight-chart__target {
-  stroke: var(--target);
+  stroke: #a7652d;
   stroke-width: 2;
   stroke-dasharray: 8 6;
 }

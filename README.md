@@ -23,6 +23,10 @@ Then open <http://localhost:3000>.
 
 The `.env` file is reserved for the later optional AI backend. Never place the OpenAI API key in files under `public/js`.
 
+## Appearance
+
+The active cheerful colour theme is defined in `public/css/app.css`. The earlier muted green theme is preserved in `public/css/app-muted.css`; it can be restored by changing the stylesheet reference in `public/index.html` or by copying its values back into the active stylesheet.
+
 ## Tests
 
 Run the deterministic unit tests with:

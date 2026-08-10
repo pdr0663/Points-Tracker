@@ -1,4 +1,13 @@
 import { openDatabase } from "./db.js";
+import {
+  createFood,
+  deleteFood,
+  foodPointsForDefaultServing,
+  foodPointsPer100g,
+  searchFoods,
+  updateFood
+} from "./foods.js";
+import { roundProPoints } from "./points.js";
 import { createRouter } from "./router.js";
 import {
   addWeighIn,
@@ -17,6 +26,11 @@ const addProfileButton = document.querySelector("#add-profile");
 
 let currentRoute;
 let showingUserForm = false;
+let showingFoodForm = false;
+let editingFoodId;
+let foodSearchQuery = "";
+let pendingDeleteFoodId;
+let foodNotice;
 let renderSequence = 0;
 
 function createElement(tagName, options = {}) {
@@ -40,14 +54,14 @@ function createScreenHeader(title, description) {
   return header;
 }
 
-function createField({ label, name, type = "text", value, min, max, step, options, attributes = {} }) {
+function createField({ label, name, type = "text", value, min, max, step, options, required = true, attributes = {} }) {
   const wrapper = createElement("div", { className: "form-field" });
   const id = `field-${name}`;
   const labelElement = createElement("label", { text: label, attributes: { for: id } });
   let control;
 
   if (options) {
-    control = createElement("select", { attributes: { ...attributes, id, name, required: "" } });
+    control = createElement("select", { attributes: { ...attributes, id, name, required: required ? "" : undefined } });
     options.forEach((option) => {
       const optionElement = createElement("option", {
         text: option.label,
@@ -67,7 +81,7 @@ function createField({ label, name, type = "text", value, min, max, step, option
         min,
         max,
         step,
-        required: ""
+        required: required ? "" : undefined
       }
     });
   }
@@ -248,7 +262,7 @@ function renderTodayScreen(state) {
   const next = createElement("article", { className: "card card--accent" });
   next.append(
     createElement("h3", { text: "Profile tracking is ready" }),
-    createElement("p", { text: "Use Settings to record another weigh-in or adjust the target weight. Food entry arrives in the next milestone." })
+    createElement("p", { text: "Use Settings to record another weigh-in or adjust the target weight. Shared foods and serving sizes are available under Foods." })
   );
   screen.append(next);
   return screen;
@@ -359,6 +373,303 @@ function renderSettingsScreen(state) {
   return screen;
 }
 
+function displayPoints(rawPoints) {
+  return roundProPoints(rawPoints, "decimal").toFixed(1);
+}
+
+function createServingRow(serving = {}, isDefault = false) {
+  const servingId = serving.id ?? `serving-${globalThis.crypto.randomUUID()}`;
+  const row = createElement("div", { className: "serving-row" });
+  row.dataset.servingId = servingId;
+
+  const defaultLabel = createElement("label", { className: "serving-default" });
+  const radio = createElement("input", {
+    attributes: {
+      type: "radio",
+      name: "defaultServingId",
+      value: servingId,
+      required: ""
+    }
+  });
+  radio.checked = isDefault;
+  defaultLabel.append(radio, createElement("span", { text: "Default" }));
+
+  const description = createElement("input", {
+    attributes: {
+      type: "text",
+      value: serving.description ?? "",
+      placeholder: "e.g. 1 slice",
+      "aria-label": "Serving description",
+      "data-serving-description": "",
+      required: ""
+    }
+  });
+  const grams = createElement("input", {
+    attributes: {
+      type: "number",
+      value: serving.grams,
+      min: "0.1",
+      step: "0.1",
+      placeholder: "grams",
+      "aria-label": "Serving weight in grams",
+      "data-serving-grams": "",
+      required: ""
+    }
+  });
+  const remove = createElement("button", {
+    className: "button button--secondary serving-remove",
+    text: "Remove",
+    attributes: { type: "button" }
+  });
+  remove.addEventListener("click", () => {
+    const rows = row.parentElement;
+    const wasDefault = radio.checked;
+    row.remove();
+    const remainingRows = [...rows.querySelectorAll(".serving-row")];
+    if (wasDefault && remainingRows.length) {
+      remainingRows[0].querySelector('[name="defaultServingId"]').checked = true;
+    }
+  });
+
+  row.append(defaultLabel, description, grams, remove);
+  return row;
+}
+
+function foodInputFromForm(form) {
+  const values = new FormData(form);
+  const servingRows = [...form.querySelectorAll(".serving-row")];
+  return {
+    name: values.get("name"),
+    brand: values.get("brand"),
+    nutritionPer100g: {
+      protein: numberValue(values, "protein"),
+      carbohydrate: numberValue(values, "carbohydrate"),
+      fat: numberValue(values, "fat"),
+      fibre: numberValue(values, "fibre")
+    },
+    servings: servingRows.map((row) => ({
+      id: row.dataset.servingId,
+      description: row.querySelector("[data-serving-description]").value,
+      grams: Number(row.querySelector("[data-serving-grams]").value)
+    })),
+    defaultServingId: values.get("defaultServingId")
+  };
+}
+
+function createFoodForm(food) {
+  const card = createElement("section", { className: "card form-card food-form-card" });
+  card.append(createElement("h3", { text: food ? `Edit ${food.name}` : "Add food" }));
+  const form = createElement("form", { className: "data-form" });
+  const fields = createElement("div", { className: "form-grid" });
+  fields.append(
+    createField({ label: "Name", name: "name", value: food?.name, attributes: { autocomplete: "off" } }),
+    createField({ label: "Brand (optional)", name: "brand", value: food?.brand, required: false, attributes: { autocomplete: "off" } }),
+    createField({ label: "Protein /100 g", name: "protein", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g.protein ?? "" }),
+    createField({ label: "Carbohydrate /100 g", name: "carbohydrate", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g.carbohydrate ?? "" }),
+    createField({ label: "Fat /100 g", name: "fat", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g.fat ?? "" }),
+    createField({ label: "Fibre /100 g", name: "fibre", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g.fibre ?? "" })
+  );
+
+  const servingSection = createElement("fieldset", { className: "serving-editor" });
+  servingSection.append(createElement("legend", { text: "Named servings" }));
+  const servingRows = createElement("div", { className: "serving-rows" });
+  const initialServings = food?.servings?.length ? food.servings : [{}];
+  initialServings.forEach((serving, index) => {
+    servingRows.append(createServingRow(serving, food ? serving.id === food.defaultServingId : index === 0));
+  });
+  const addServing = createElement("button", {
+    className: "button button--secondary",
+    text: "Add serving",
+    attributes: { type: "button" }
+  });
+  addServing.addEventListener("click", () => servingRows.append(createServingRow()));
+  servingSection.append(servingRows, addServing);
+
+  const calculation = createElement("p", {
+    className: "food-calculation",
+    text: "Enter nutrition and a default serving to calculate ProPoints.",
+    attributes: { role: "status", "aria-live": "polite" }
+  });
+  function updateCalculation() {
+    try {
+      const input = foodInputFromForm(form);
+      const defaultServing = input.servings.find((serving) => serving.id === input.defaultServingId);
+      if (!defaultServing || !defaultServing.grams) return;
+      const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing };
+      calculation.textContent = `${displayPoints(foodPointsPer100g(preview))} PP per 100 g · ${displayPoints(foodPointsForDefaultServing(preview))} PP per ${defaultServing.description || "default serving"}`;
+    } catch {
+      calculation.textContent = "Enter nutrition and a default serving to calculate ProPoints.";
+    }
+  }
+  form.addEventListener("input", updateCalculation);
+  form.addEventListener("change", updateCalculation);
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const submit = createElement("button", {
+    className: "button button--primary",
+    text: food ? "Save changes" : "Create food",
+    attributes: { type: "submit" }
+  });
+  const cancel = createElement("button", {
+    className: "button button--secondary",
+    text: "Cancel",
+    attributes: { type: "button" }
+  });
+  cancel.addEventListener("click", () => {
+    showingFoodForm = false;
+    editingFoodId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(submit, cancel);
+
+  form.append(fields, servingSection, calculation, message, actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    showFormMessage(message, "Saving food…", "progress");
+    try {
+      const input = foodInputFromForm(form);
+      const saved = food ? await updateFood(food.id, input) : await createFood(input);
+      showingFoodForm = false;
+      editingFoodId = undefined;
+      foodNotice = `${saved.name} ${food ? "updated" : "created"}.`;
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not save food", error);
+      showFormMessage(message, error.message);
+      submit.disabled = false;
+    }
+  });
+
+  card.append(form);
+  queueMicrotask(updateCalculation);
+  return card;
+}
+
+function createFoodSearch() {
+  const form = createElement("form", { className: "food-search", attributes: { role: "search" } });
+  const label = createElement("label", { className: "visually-hidden", text: "Search foods", attributes: { for: "food-search" } });
+  const input = createElement("input", {
+    attributes: { id: "food-search", name: "query", type: "search", value: foodSearchQuery, placeholder: "Search name or brand" }
+  });
+  const submit = createElement("button", { className: "button button--primary", text: "Search", attributes: { type: "submit" } });
+  form.append(label, input, submit);
+  if (foodSearchQuery) {
+    const clear = createElement("button", { className: "button button--secondary", text: "Clear", attributes: { type: "button" } });
+    clear.addEventListener("click", () => {
+      foodSearchQuery = "";
+      void renderCurrentRoute();
+    });
+    form.append(clear);
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    foodSearchQuery = input.value;
+    void renderCurrentRoute();
+  });
+  return form;
+}
+
+function createFoodCard(food) {
+  const card = createElement("article", { className: "card food-card" });
+  const heading = createElement("div", { className: "food-card__heading" });
+  const identity = createElement("div");
+  identity.append(createElement("h3", { text: food.name }));
+  if (food.brand) identity.append(createElement("p", { className: "food-brand", text: food.brand }));
+  heading.append(identity, createElement("strong", { className: "food-points", text: `${displayPoints(foodPointsPer100g(food))} PP /100 g` }));
+
+  const servingList = createElement("ul", { className: "serving-list" });
+  food.servings.forEach((serving) => {
+    const isDefault = serving.id === food.defaultServingId;
+    const rawPoints = foodPointsPer100g(food) * serving.grams / 100;
+    servingList.append(createElement("li", {
+      text: `${serving.description} · ${serving.grams} g · ${displayPoints(rawPoints)} PP${isDefault ? " · default" : ""}`
+    }));
+  });
+
+  const actions = createElement("div", { className: "form-actions food-card__actions" });
+  const edit = createElement("button", { className: "button button--secondary", text: "Edit", attributes: { type: "button" } });
+  edit.addEventListener("click", () => {
+    editingFoodId = food.id;
+    showingFoodForm = true;
+    pendingDeleteFoodId = undefined;
+    void renderCurrentRoute();
+  });
+  actions.append(edit);
+
+  if (pendingDeleteFoodId === food.id) {
+    actions.append(createElement("span", { className: "delete-question", text: "Delete this food?" }));
+    const confirm = createElement("button", { className: "button button--danger", text: "Yes, delete", attributes: { type: "button" } });
+    const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      try {
+        await deleteFood(food.id);
+        pendingDeleteFoodId = undefined;
+        foodNotice = `${food.name} deleted.`;
+      } catch (error) {
+        console.error("Could not delete food", error);
+        foodNotice = error.message;
+      }
+      await renderCurrentRoute();
+    });
+    cancel.addEventListener("click", () => {
+      pendingDeleteFoodId = undefined;
+      void renderCurrentRoute();
+    });
+    actions.append(confirm, cancel);
+  } else {
+    const remove = createElement("button", { className: "button button--secondary", text: "Delete", attributes: { type: "button" } });
+    remove.addEventListener("click", () => {
+      pendingDeleteFoodId = food.id;
+      void renderCurrentRoute();
+    });
+    actions.append(remove);
+  }
+
+  card.append(heading, servingList, actions);
+  return card;
+}
+
+function renderFoodsScreen(foods) {
+  const screen = createElement("section", { className: "screen" });
+  const header = createScreenHeader("Foods", "Shared household foods, nutrition and named serving sizes.");
+  const addFood = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button" } });
+  addFood.addEventListener("click", () => {
+    showingFoodForm = true;
+    editingFoodId = undefined;
+    pendingDeleteFoodId = undefined;
+    void renderCurrentRoute();
+  });
+  header.append(addFood);
+  screen.append(header);
+
+  if (foodNotice) {
+    screen.append(createElement("p", { className: "notice", text: foodNotice, attributes: { role: "status" } }));
+    foodNotice = undefined;
+  }
+
+  if (showingFoodForm) {
+    const food = editingFoodId ? foods.find((item) => item.id === editingFoodId) : undefined;
+    screen.append(createFoodForm(food));
+    return screen;
+  }
+
+  screen.append(createFoodSearch());
+  const list = createElement("div", { className: "food-list" });
+  if (!foods.length) {
+    list.append(createElement("article", {
+      className: "card empty-state",
+      text: foodSearchQuery ? "No foods match this search." : "No foods yet. Add the first shared household food."
+    }));
+  } else {
+    foods.forEach((food) => list.append(createFoodCard(food)));
+  }
+  screen.append(list);
+  return screen;
+}
+
 function renderPlaceholder(route) {
   const screen = createElement("section", { className: "screen" });
   screen.append(createScreenHeader(route.title, route.description));
@@ -384,6 +695,10 @@ async function renderScreen(route) {
     screen = renderTodayScreen(state);
   } else if (route.name === "settings") {
     screen = renderSettingsScreen(state);
+  } else if (route.name === "foods") {
+    const foods = await searchFoods(foodSearchQuery);
+    if (sequence !== renderSequence) return;
+    screen = renderFoodsScreen(foods);
   } else {
     screen = renderPlaceholder(route);
   }

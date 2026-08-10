@@ -1,6 +1,6 @@
 # ProPoints Tracker
 
-A lightweight, mobile-first ProPoints tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M3 checkpoint.
+A lightweight, mobile-first ProPoints tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M4 checkpoint.
 
 ## Requirements
 
@@ -57,12 +57,13 @@ Implemented milestones:
 - M1: versioned IndexedDB database, stores, indexes, CRUD wrapper, transactions and developer reset
 - M2: raw food ProPoints, fruit/confirmed zero-point handling, display rounding, age and daily allowance calculations
 - M3: first-run household setup, multiple profiles, persistent profile switching, weigh-ins with historical allowance snapshots, and editable target weight
+- M4: shared food creation, editing, named servings, normalized search, calculated ProPoints, persistence, and reference-protected deletion
 
-Foods, diary entries, recipes, progress and AI workflows intentionally remain placeholders until their assigned milestones.
+Diary entries, recipes, progress and AI workflows intentionally remain placeholders until their assigned milestones.
 
 ## Architecture
 
-The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. Screens use those modules through feature-level services as later milestones are added.
+The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. Screens use those modules through feature-level services as later milestones are added.
 
 The development server in `server/index.js` currently serves the static application. Later AI routes will remain optional and will call OpenAI only from the server:
 

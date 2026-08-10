@@ -33,7 +33,8 @@ body {
 button,
 a,
 input,
-select {
+select,
+fieldset {
   font: inherit;
 }
 
@@ -272,6 +273,11 @@ select:focus-visible,
   border-color: var(--border);
 }
 
+.button--danger {
+  color: white;
+  background: #8a2f27;
+}
+
 .button:disabled {
   cursor: wait;
   opacity: 0.65;
@@ -331,6 +337,137 @@ select:focus-visible,
 
 .card--wide {
   grid-column: 1 / -1;
+}
+
+.notice {
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  color: var(--accent-strong);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.food-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.food-search input {
+  flex: 1 1 13rem;
+  min-width: 0;
+  min-height: 2.8rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--text);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.food-list,
+.serving-rows {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.food-card__heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.food-brand {
+  margin: 0.25rem 0 0;
+}
+
+.food-points {
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+.serving-list {
+  margin: 1rem 0;
+  padding-left: 1.25rem;
+  color: var(--text-muted);
+}
+
+.serving-list li + li {
+  margin-top: 0.35rem;
+}
+
+.food-card__actions {
+  align-items: center;
+}
+
+.delete-question {
+  color: #8a2f27;
+  font-weight: 700;
+}
+
+.serving-editor {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+}
+
+.serving-editor legend {
+  padding-inline: 0.35rem;
+  font-weight: 750;
+}
+
+.serving-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(5.5rem, 0.45fr);
+  gap: 0.55rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.serving-row input[type="text"],
+.serving-row input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.8rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--text);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.serving-default {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.serving-remove {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.food-calculation {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  color: var(--accent-strong);
+  font-weight: 750;
+  background: var(--surface-muted);
+  border-radius: 0.75rem;
+}
+
+.empty-state {
+  color: var(--text-muted);
 }
 
 .status-list {
@@ -427,5 +564,15 @@ select:focus-visible,
 
   .card-grid--two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .serving-row {
+    grid-template-columns: auto minmax(10rem, 1fr) 8rem auto;
+    align-items: center;
+  }
+
+  .serving-default,
+  .serving-remove {
+    grid-column: auto;
   }
 }

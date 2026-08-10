@@ -4,6 +4,7 @@ import { roundProPoints } from "./points.js";
 import { listWeighIns } from "./users.js";
 
 export const MEALS = Object.freeze(["breakfast", "lunch", "dinner", "snack", "other"]);
+const POINT_EPSILON = 1e-9;
 
 function createId(prefix) {
   return `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -36,6 +37,13 @@ function parseDate(value, name = "date") {
 
 function dateString(date) {
   return date.toISOString().slice(0, 10);
+}
+
+export function shiftLocalDate(date, days) {
+  const parsed = parseDate(date);
+  if (!Number.isInteger(days)) throw new TypeError("days must be an integer.");
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return dateString(parsed);
 }
 
 function requireMeal(meal) {
@@ -178,26 +186,110 @@ export function sumRawPoints(entries) {
   return entries.reduce((total, entry) => total + entry.rawPoints, 0);
 }
 
+function datesInRange(start, end) {
+  const dates = [];
+  const cursor = parseDate(start, "start");
+  const finalDate = parseDate(end, "end");
+  while (cursor <= finalDate) {
+    dates.push(dateString(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+export function calculateWeeklyUsage({ entries, weighIns, weeklyAllowance, anchorDate, asOfDate = anchorDate }) {
+  if (!Number.isFinite(weeklyAllowance) || weeklyAllowance < 0) {
+    throw new RangeError("weeklyAllowance must be at least zero.");
+  }
+  parseDate(asOfDate, "asOfDate");
+  const range = weekRange(anchorDate);
+  const weekDates = datesInRange(range.start, range.end);
+  const firstBudgetDate = [...weighIns].sort((left, right) => left.date.localeCompare(right.date))[0]?.date;
+  const effectiveAsOfDate = asOfDate < range.start
+    ? range.start
+    : asOfDate > range.end
+      ? range.end
+      : asOfDate;
+
+  const days = weekDates.map((date) => {
+    const dateEntries = entries.filter((entry) => entry.date === date);
+    const usedPoints = sumRawPoints(dateEntries);
+    const hasBudget = Boolean(firstBudgetDate && date >= firstBudgetDate);
+    const dailyBudget = hasBudget ? dailyBudgetForDate(weighIns, date) : 0;
+    const budgetDifference = usedPoints - dailyBudget;
+    const budgetStatus = !hasBudget
+      ? "inactive"
+      : budgetDifference > POINT_EPSILON
+        ? "over"
+        : budgetDifference < -POINT_EPSILON
+          ? "under"
+          : "at";
+    return {
+      date,
+      dailyBudget,
+      usedPoints,
+      ordinaryPointsConsumed: Math.min(usedPoints, dailyBudget),
+      weeklyExtrasConsumed: budgetDifference > POINT_EPSILON ? budgetDifference : 0,
+      remainingPoints: dailyBudget - usedPoints,
+      budgetStatus,
+      isActive: hasBudget,
+      isElapsed: hasBudget && date <= effectiveAsOfDate,
+      entryCount: dateEntries.length
+    };
+  });
+  const activeDays = days.filter((day) => day.isActive);
+  const elapsedDays = days.filter((day) => day.isElapsed);
+  const ordinaryBudgetAvailable = activeDays.reduce((total, day) => total + day.dailyBudget, 0);
+  const ordinaryPointsConsumed = activeDays.reduce((total, day) => total + day.ordinaryPointsConsumed, 0);
+  const weeklyExtrasConsumed = activeDays.reduce((total, day) => total + day.weeklyExtrasConsumed, 0);
+  const elapsedPoints = elapsedDays.reduce((total, day) => total + day.usedPoints, 0);
+
+  return {
+    weekStart: range.start,
+    weekEnd: range.end,
+    asOfDate: effectiveAsOfDate,
+    ordinaryBudgetAvailable,
+    ordinaryPointsConsumed,
+    weeklyExtrasConsumed,
+    weeklyExtrasRemaining: weeklyAllowance - weeklyExtrasConsumed,
+    averagePointsPerDay: elapsedDays.length ? elapsedPoints / elapsedDays.length : 0,
+    daysUnderBudget: elapsedDays.filter((day) => day.budgetStatus === "under").length,
+    daysOverBudget: elapsedDays.filter((day) => day.budgetStatus === "over").length,
+    daysAtBudget: elapsedDays.filter((day) => day.budgetStatus === "at").length,
+    days
+  };
+}
+
+export async function getWeeklySummary(userId, anchorDate, options = {}) {
+  const user = await get("users", userId);
+  if (!user) throw new RangeError("Cannot summarize a user that does not exist.");
+  const weighIns = await listWeighIns(userId);
+  const range = weekRange(anchorDate);
+  const userEntries = await queryIndex("diaryEntries", "userId", userId);
+  const entries = userEntries.filter((entry) => entry.date >= range.start && entry.date <= range.end);
+  return calculateWeeklyUsage({
+    entries,
+    weighIns,
+    weeklyAllowance: user.weeklyAllowance,
+    anchorDate,
+    asOfDate: options.asOfDate ?? anchorDate
+  });
+}
+
 export async function getDiarySummary(userId, date) {
   const user = await get("users", userId);
   if (!user) throw new RangeError("Cannot summarize a user that does not exist.");
   const weighIns = await listWeighIns(userId);
   const dailyBudget = dailyBudgetForDate(weighIns, date);
   const entries = await listDiaryEntries(userId, date);
-  const range = weekRange(date);
   const userEntries = await queryIndex("diaryEntries", "userId", userId);
-  const weeklyEntries = userEntries.filter((entry) => entry.date >= range.start && entry.date <= range.end);
-  const entriesByDate = new Map();
-  weeklyEntries.forEach((entry) => {
-    const dateEntries = entriesByDate.get(entry.date) ?? [];
-    dateEntries.push(entry);
-    entriesByDate.set(entry.date, dateEntries);
+  const weekly = calculateWeeklyUsage({
+    entries: userEntries,
+    weighIns,
+    weeklyAllowance: user.weeklyAllowance,
+    anchorDate: date,
+    asOfDate: date
   });
-  let weeklyExtrasUsed = 0;
-  for (const [entryDate, dateEntries] of entriesByDate) {
-    const budget = dailyBudgetForDate(weighIns, entryDate);
-    weeklyExtrasUsed += summarizeDay(dateEntries, budget).dailyExcess;
-  }
 
   return {
     date,
@@ -207,9 +299,9 @@ export async function getDiarySummary(userId, date) {
       sumRawPoints(entries.filter((entry) => entry.meal === meal))
     ])),
     ...summarizeDay(entries, dailyBudget),
-    weekStart: range.start,
-    weekEnd: range.end,
-    weeklyExtrasUsed,
-    weeklyExtrasRemaining: user.weeklyAllowance - weeklyExtrasUsed
+    weekStart: weekly.weekStart,
+    weekEnd: weekly.weekEnd,
+    weeklyExtrasUsed: weekly.weeklyExtrasConsumed,
+    weeklyExtrasRemaining: weekly.weeklyExtrasRemaining
   };
 }

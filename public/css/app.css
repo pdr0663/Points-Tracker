@@ -591,6 +591,63 @@ select:focus-visible,
   font-size: 0.84rem;
 }
 
+.week-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.week-navigation strong {
+  order: -1;
+  flex: 1 0 100%;
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.week-navigation .button {
+  flex: 1 1 8rem;
+}
+
+.weekly-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.weekly-explanation {
+  margin-bottom: 1rem;
+}
+
+.weekly-days {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.weekly-day {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.weekly-day__heading {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.weekly-day__details {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.weekly-day .button {
+  justify-self: start;
+}
+
 .status-list {
   display: grid;
   gap: 0.75rem;
@@ -688,11 +745,19 @@ select:focus-visible,
   }
 
   .today-actions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
   }
 
   .diary-totals {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .weekly-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .weekly-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .serving-row {

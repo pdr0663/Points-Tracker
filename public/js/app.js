@@ -4,8 +4,11 @@ import {
   deleteDiaryEntry,
   duplicateDiaryEntry,
   getDiarySummary,
+  getWeeklySummary,
   MEALS,
-  updateDiaryEntry
+  shiftLocalDate,
+  updateDiaryEntry,
+  weekRange
 } from "./diary.js";
 import {
   createFood,
@@ -46,6 +49,7 @@ let showingDiaryForm = false;
 let editingDiaryEntryId;
 let pendingDeleteDiaryEntryId;
 let diaryNotice;
+let selectedWeekDate = localDateString();
 let renderSequence = 0;
 
 function createElement(tagName, options = {}) {
@@ -259,7 +263,7 @@ function createMetric(label, value, detail) {
   return metric;
 }
 
-function renderTodayScreen(state, summary) {
+function renderTodayScreen(state, summary, weekly) {
   const { currentUser, weighIns } = state;
   const currentWeighIn = weighIns.at(-1);
   const screen = createElement("section", { className: "screen" });
@@ -284,12 +288,15 @@ function renderTodayScreen(state, summary) {
     createElement("p", { text: `${summary.weekStart} to ${summary.weekEnd}` }),
     createElement("p", {
       className: "today-week__value",
-      text: `${displayPoints(summary.weeklyExtrasUsed)} / ${currentUser.weeklyAllowance} PP weekly extras used`
+      text: `${displayPoints(weekly.ordinaryPointsConsumed)} / ${displayPoints(weekly.ordinaryBudgetAvailable)} ordinary PP used`
     }),
     createElement("p", {
-      text: summary.weeklyExtrasRemaining >= 0
-        ? `${displayPoints(summary.weeklyExtrasRemaining)} PP weekly extras remaining`
-        : `${displayPoints(Math.abs(summary.weeklyExtrasRemaining))} PP beyond weekly extras`
+      text: `${displayPoints(weekly.weeklyExtrasConsumed)} / ${currentUser.weeklyAllowance} PP weekly extras used`
+    }),
+    createElement("p", {
+      text: weekly.weeklyExtrasRemaining >= 0
+        ? `${displayPoints(weekly.weeklyExtrasRemaining)} PP weekly extras remaining`
+        : `${displayPoints(Math.abs(weekly.weeklyExtrasRemaining))} PP beyond weekly extras`
     })
   );
 
@@ -311,7 +318,12 @@ function renderTodayScreen(state, summary) {
     selectedDiaryDate = summary.date;
     window.location.hash = "diary";
   });
-  actions.append(tellAi, addEntry, viewDiary);
+  const viewWeek = createElement("button", { className: "button button--secondary", text: "View week", attributes: { type: "button" } });
+  viewWeek.addEventListener("click", () => {
+    selectedWeekDate = summary.date;
+    window.location.hash = "progress";
+  });
+  actions.append(tellAi, addEntry, viewDiary, viewWeek);
   screen.append(week, actions);
   return screen;
 }
@@ -1047,6 +1059,109 @@ function renderDiaryScreen(state, summary, foods) {
   return screen;
 }
 
+function formatWeekdayDate(date) {
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC"
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+function weeklyDayStatus(day, asOfDate) {
+  if (!day.isActive) return "Before tracking began";
+  if (day.date > asOfDate) return "Upcoming";
+  if (day.budgetStatus === "over") {
+    return `${displayPoints(day.weeklyExtrasConsumed)} PP from weekly extras`;
+  }
+  if (day.budgetStatus === "at") return "At daily budget";
+  return `${displayPoints(day.remainingPoints)} PP remaining`;
+}
+
+function renderWeeklyScreen(state, summary) {
+  const screen = createElement("section", { className: "screen weekly-screen" });
+  screen.append(createScreenHeader("Weekly tracking", `${state.currentUser.name}'s Monday–Sunday summary.`));
+
+  const navigation = createElement("div", { className: "week-navigation" });
+  const previous = createElement("button", {
+    className: "button button--secondary",
+    text: "Previous week",
+    attributes: { type: "button", disabled: summary.weekStart <= state.weighIns[0].date ? "" : undefined }
+  });
+  previous.addEventListener("click", () => {
+    selectedWeekDate = shiftLocalDate(summary.weekStart, -7);
+    void renderCurrentRoute();
+  });
+  const period = createElement("strong", { text: `${summary.weekStart} to ${summary.weekEnd}` });
+  const current = createElement("button", { className: "button button--secondary", text: "Current week", attributes: { type: "button" } });
+  current.addEventListener("click", () => {
+    selectedWeekDate = localDateString();
+    void renderCurrentRoute();
+  });
+  const next = createElement("button", {
+    className: "button button--secondary",
+    text: "Next week",
+    attributes: { type: "button", disabled: summary.weekEnd >= localDateString() ? "" : undefined }
+  });
+  next.addEventListener("click", () => {
+    selectedWeekDate = shiftLocalDate(summary.weekStart, 7);
+    void renderCurrentRoute();
+  });
+  navigation.append(previous, period, current, next);
+  screen.append(navigation);
+
+  const metrics = createElement("div", { className: "weekly-metrics" });
+  metrics.append(
+    createMetric("Ordinary budget", `${displayPoints(summary.ordinaryBudgetAvailable)} PP`, "Available Monday–Sunday"),
+    createMetric("Ordinary consumed", `${displayPoints(summary.ordinaryPointsConsumed)} PP`, "Capped at each day's budget"),
+    createMetric("Weekly extras used", `${displayPoints(summary.weeklyExtrasConsumed)} PP`, `${state.currentUser.weeklyAllowance} PP allowance`),
+    createMetric(
+      summary.weeklyExtrasRemaining >= 0 ? "Weekly extras remaining" : "Beyond weekly extras",
+      `${displayPoints(Math.abs(summary.weeklyExtrasRemaining))} PP`
+    ),
+    createMetric("Average per day", `${displayPoints(summary.averagePointsPerDay)} PP`, `Through ${summary.asOfDate}`),
+    createMetric("Daily budget comparison", `${summary.daysUnderBudget} under · ${summary.daysOverBudget} over`, `${summary.daysAtBudget} at budget`)
+  );
+  screen.append(metrics);
+
+  const explanation = createElement("article", { className: "card card--accent weekly-explanation" });
+  explanation.append(
+    createElement("h3", { text: "How weekly extras are counted" }),
+    createElement("p", { text: "Only the amount above an individual day's ordinary budget uses weekly extras. Unused ordinary points do not carry into another day." })
+  );
+  screen.append(explanation);
+
+  const days = createElement("div", { className: "weekly-days" });
+  summary.days.forEach((day) => {
+    const card = createElement("article", { className: "card weekly-day" });
+    const heading = createElement("div", { className: "weekly-day__heading" });
+    heading.append(
+      createElement("h3", { text: formatWeekdayDate(day.date) }),
+      createElement("strong", { text: `${displayPoints(day.usedPoints)} PP` })
+    );
+    const details = createElement("div", { className: "weekly-day__details" });
+    details.append(
+      createElement("span", { text: day.isActive ? `${day.dailyBudget} PP budget` : "No daily budget" }),
+      createElement("span", { text: `${day.entryCount} entr${day.entryCount === 1 ? "y" : "ies"}` }),
+      createElement("span", { text: weeklyDayStatus(day, summary.asOfDate) })
+    );
+    card.append(heading, details);
+    if (day.isActive && day.date <= summary.asOfDate) {
+      const diary = createElement("button", { className: "button button--small button--secondary", text: "Open diary", attributes: { type: "button" } });
+      diary.addEventListener("click", () => {
+        selectedDiaryDate = day.date;
+        showingDiaryForm = false;
+        editingDiaryEntryId = undefined;
+        window.location.hash = "diary";
+      });
+      card.append(diary);
+    }
+    days.append(card);
+  });
+  screen.append(days);
+  return screen;
+}
+
 function renderPlaceholder(route) {
   const screen = createElement("section", { className: "screen" });
   screen.append(createScreenHeader(route.title, route.description));
@@ -1069,9 +1184,13 @@ async function renderScreen(route) {
   if (!state.currentUser || showingUserForm) {
     screen = renderSetupScreen(state);
   } else if (route.name === "today") {
-    const summary = await getDiarySummary(state.currentUser.id, localDateString());
+    const today = localDateString();
+    const [summary, weekly] = await Promise.all([
+      getDiarySummary(state.currentUser.id, today),
+      getWeeklySummary(state.currentUser.id, today, { asOfDate: today })
+    ]);
     if (sequence !== renderSequence) return;
-    screen = renderTodayScreen(state, summary);
+    screen = renderTodayScreen(state, summary, weekly);
   } else if (route.name === "diary") {
     if (selectedDiaryDate < state.weighIns[0].date) selectedDiaryDate = state.weighIns[0].date;
     const [summary, foods] = await Promise.all([
@@ -1086,6 +1205,19 @@ async function renderScreen(route) {
     const foods = await searchFoods(foodSearchQuery);
     if (sequence !== renderSequence) return;
     screen = renderFoodsScreen(foods);
+  } else if (route.name === "progress") {
+    const firstWeekStart = weekRange(state.weighIns[0].date).start;
+    if (selectedWeekDate < firstWeekStart) selectedWeekDate = state.weighIns[0].date;
+    const selectedRange = weekRange(selectedWeekDate);
+    const today = localDateString();
+    const asOfDate = today < selectedRange.start
+      ? selectedRange.start
+      : today > selectedRange.end
+        ? selectedRange.end
+        : today;
+    const weekly = await getWeeklySummary(state.currentUser.id, selectedWeekDate, { asOfDate });
+    if (sequence !== renderSequence) return;
+    screen = renderWeeklyScreen(state, weekly);
   } else {
     screen = renderPlaceholder(route);
   }

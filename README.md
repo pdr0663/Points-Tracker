@@ -1,6 +1,6 @@
 # ProPoints Tracker
 
-A lightweight, mobile-first ProPoints tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M5 checkpoint.
+A lightweight, mobile-first ProPoints tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M6 checkpoint.
 
 ## Requirements
 
@@ -59,6 +59,7 @@ Implemented milestones:
 - M3: first-run household setup, multiple profiles, persistent profile switching, weigh-ins with historical allowance snapshots, and editable target weight
 - M4: shared food creation, editing, named servings, normalized search, calculated ProPoints, persistence, and reference-protected deletion
 - M5: user-isolated daily diaries, food-entry snapshots, add/edit/delete/duplicate workflows, Today totals, and Monday–Sunday weekly-extra calculations
+- M6: weekly tracking with ordinary-versus-extra point accounting, historical week navigation, daily breakdowns, averages, neutral budget comparisons, and calendar-boundary coverage
 
 Recipes, progress and AI workflows intentionally remain placeholders until their assigned milestones.
 

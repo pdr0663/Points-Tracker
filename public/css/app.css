@@ -4,15 +4,15 @@
   --background: #fff8ed;
   --surface: #ffffff;
   --surface-muted: #f3edff;
-  --surface-highlight: #fff0c7;
+  --surface-highlight: #e5f7f4;
   --text: #302641;
   --text-muted: #665d75;
   --accent: #7c3aed;
   --accent-strong: #5b21b6;
   --border: #ddd2ee;
-  --focus: #c2410c;
+  --focus: #0f766e;
   --danger: #b42318;
-  --target: #d97706;
+  --target: #0f766e;
   --shadow: 0 12px 32px rgb(91 33 182 / 11%);
 }
 
@@ -31,7 +31,7 @@ body {
   color: var(--text);
   background:
     radial-gradient(circle at top right, rgb(255 179 190 / 42%), transparent 26rem),
-    radial-gradient(circle at top left, rgb(255 220 122 / 30%), transparent 22rem),
+    radial-gradient(circle at top left, rgb(137 220 211 / 30%), transparent 22rem),
     var(--background);
 }
 

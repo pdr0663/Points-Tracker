@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#315f58">
+    <meta name="description" content="A local-first ProPoints tracker for two household users.">
+    <title>ProPoints Tracker</title>
+    <link rel="stylesheet" href="./css/app.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <header class="app-header">
+      <div class="app-header__inner">
+        <div>
+          <p class="eyebrow">Household tracker</p>
+          <h1>ProPoints</h1>
+        </div>
+        <button class="profile-button" type="button" disabled aria-label="Household profiles will be available in milestone 3">
+          Profiles
+        </button>
+      </div>
+    </header>
+
+    <div class="app-layout">
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <a href="#today" data-route="today">Today</a>
+        <a href="#diary" data-route="diary">Diary</a>
+        <a href="#foods" data-route="foods">Foods</a>
+        <a href="#recipes" data-route="recipes">Recipes</a>
+        <a href="#progress" data-route="progress">Progress</a>
+        <a href="#settings" data-route="settings">Settings</a>
+      </nav>
+
+      <main id="main-content" tabindex="-1" aria-live="polite"></main>
+    </div>
+
+    <noscript>This application requires JavaScript.</noscript>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

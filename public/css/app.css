@@ -1,0 +1,254 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --background: #f4f2eb;
+  --surface: #ffffff;
+  --surface-muted: #e6eeeb;
+  --text: #18302c;
+  --text-muted: #60736f;
+  --accent: #315f58;
+  --accent-strong: #234b45;
+  --border: #cfdbd7;
+  --shadow: 0 12px 32px rgb(35 75 69 / 8%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top right, rgb(176 205 194 / 35%), transparent 25rem),
+    var(--background);
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #df8f48;
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 20;
+  top: 0.75rem;
+  left: 0.75rem;
+  padding: 0.75rem 1rem;
+  color: white;
+  background: var(--accent-strong);
+  border-radius: 0.5rem;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.app-header {
+  padding: 1rem;
+  color: white;
+  background: var(--accent);
+}
+
+.app-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 70rem;
+  margin: 0 auto;
+}
+
+.app-header h1,
+.screen-header h2,
+.card h3 {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.app-header h1 {
+  font-size: clamp(1.35rem, 5vw, 1.8rem);
+}
+
+.eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.profile-button {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.9rem;
+  color: white;
+  background: rgb(255 255 255 / 12%);
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 999px;
+}
+
+.app-layout {
+  max-width: 70rem;
+  margin: 0 auto;
+}
+
+#main-content {
+  width: 100%;
+  padding: 1.25rem 1rem 6.5rem;
+}
+
+.screen {
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.screen-header {
+  margin-bottom: 1.25rem;
+}
+
+.screen-header h2 {
+  font-size: clamp(1.75rem, 8vw, 2.5rem);
+}
+
+.screen-header p,
+.card p {
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.screen-header p {
+  margin: 0.4rem 0 0;
+}
+
+.card-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.card {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.card--accent {
+  background: var(--surface-muted);
+}
+
+.card p:last-child {
+  margin-bottom: 0;
+}
+
+.status-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.status-list li::before {
+  content: "✓";
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.primary-nav {
+  position: fixed;
+  z-index: 10;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  padding: 0.35rem max(0.35rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.35rem, env(safe-area-inset-left));
+  background: rgb(255 255 255 / 96%);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.primary-nav a {
+  min-width: 0;
+  padding: 0.75rem 0.15rem;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: clamp(0.67rem, 2.9vw, 0.82rem);
+  font-weight: 650;
+  text-align: center;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  border-radius: 0.65rem;
+}
+
+.primary-nav a[aria-current="page"] {
+  color: var(--accent-strong);
+  background: var(--surface-muted);
+}
+
+@media (min-width: 48rem) {
+  .app-header {
+    padding-block: 1.25rem;
+  }
+
+  .app-layout {
+    display: grid;
+    grid-template-columns: 12rem minmax(0, 1fr);
+    gap: 2rem;
+    padding: 2rem 1.5rem;
+  }
+
+  .primary-nav {
+    position: sticky;
+    top: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    padding: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    box-shadow: var(--shadow);
+    backdrop-filter: none;
+  }
+
+  .primary-nav a {
+    padding: 0.8rem 0.9rem;
+    font-size: 0.95rem;
+    text-align: left;
+  }
+
+  #main-content {
+    padding: 0;
+  }
+
+  .screen {
+    margin: 0;
+  }
+
+  .card-grid--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+

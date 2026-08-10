@@ -1,6 +1,6 @@
 # Points Tracker
 
-A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M8 checkpoint.
+A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M9 checkpoint.
 
 ## Requirements
 
@@ -62,12 +62,13 @@ Implemented milestones:
 - M6: weekly tracking with ordinary-versus-extra point accounting, historical week navigation, daily breakdowns, averages, neutral budget comparisons, and calendar-boundary coverage
 - M7: reusable recipes with explicit ingredients, gram-normalized quantities, named servings, live total/per-serving calculations, fractional diary servings, frozen diary snapshots, and reference-protected deletion
 - M8: goal progress with unclamped numerical and clamped visual percentages, sensible weight milestones, current and completed weigh-in periods, and a responsive SVG weight-history chart
+- M9: complete JSON export, strict import validation and review, explicit replacement confirmation, and transactional all-store restore
 
 AI workflows intentionally remain placeholders until their assigned milestones.
 
 ## Architecture
 
-The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. `recipes.js` owns ingredient normalization, recipe calculations, search and protected deletion. `diary.js` owns food and recipe snapshots, user/date isolation, daily totals, historical daily budgets and weekly-extra calculations. `progress.js` owns goal, milestone, weigh-in-period and chart-data calculations. Screens use those modules through feature-level services as later milestones are added.
+The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. `recipes.js` owns ingredient normalization, recipe calculations, search and protected deletion. `diary.js` owns food and recipe snapshots, user/date isolation, daily totals, historical daily budgets and weekly-extra calculations. `progress.js` owns goal, milestone, weigh-in-period and chart-data calculations. `backup.js` owns portable export, validation, summaries, filenames, and transactional restore. Screens use those modules through feature-level services as later milestones are added.
 
 The development server in `server/index.js` currently serves the static application. Later AI routes will remain optional and will call OpenAI only from the server:
 
@@ -86,7 +87,9 @@ Normal tracking must continue working if the AI API is unavailable.
 
 ## Data storage
 
-Normal application data is stored locally in the browser's IndexedDB database named `points-tracker`. Clearing browser site data removes it. Backup and restore will be added before the application is used as the authoritative household diary.
+Normal application data is stored locally in the browser's IndexedDB database named `points-tracker`. Clearing browser site data removes it.
+
+Use **Settings > Export backup** to download the complete local dataset as `points-tracker-backup-YYYY-MM-DD.json`. **Choose backup file** validates an export and shows record counts without changing data. Restoring requires a separate confirmation checkbox and atomically replaces all local application data. Import is also available on the first-run screen so an empty installation can be recovered directly.
 
 The database uses explicit migrations. Future schema changes must add a migration and increase `DATABASE_VERSION`; existing databases must not be deleted as an upgrade mechanism.
 

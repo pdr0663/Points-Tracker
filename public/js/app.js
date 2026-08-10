@@ -1,5 +1,14 @@
 import { openDatabase } from "./db.js";
 import {
+  backupFilename,
+  createBackup,
+  MAX_BACKUP_BYTES,
+  parseBackup,
+  restoreBackup,
+  serializeBackup,
+  summarizeBackup
+} from "./backup.js";
+import {
   createDiaryEntry,
   deleteDiaryEntry,
   duplicateDiaryEntry,
@@ -265,7 +274,8 @@ function renderSetupScreen(state) {
         ? "Create another independent profile while keeping foods and recipes shared."
         : "Create the first household profile and initial weigh-in."
     ),
-    createUserForm(state.users.length > 0)
+    createUserForm(state.users.length > 0),
+    createBackupCard({ canExport: state.users.length > 0 })
   );
   return screen;
 }
@@ -438,6 +448,132 @@ function createWeighInHistory(weighIns) {
   return card;
 }
 
+function createBackupCard({ canExport }) {
+  const card = createElement("section", { className: "card card--wide backup-card" });
+  card.append(
+    createElement("h3", { text: "Backup and restore" }),
+    createElement("p", { text: "Export every local profile, food, recipe, diary entry, setting, and weigh-in as one JSON file." })
+  );
+
+  const actions = createElement("div", { className: "form-actions" });
+  const exportButton = createElement("button", {
+    className: "button button--secondary",
+    text: "Export backup",
+    attributes: { type: "button", disabled: canExport ? undefined : "" }
+  });
+  const fileLabel = createElement("label", { className: "button button--secondary backup-file-label", text: "Choose backup file" });
+  const fileInput = createElement("input", {
+    attributes: { type: "file", accept: ".json,application/json", "aria-label": "Import backup file" }
+  });
+  fileLabel.append(fileInput);
+  actions.append(exportButton, fileLabel);
+  card.append(actions);
+
+  const message = createFormMessage();
+  card.append(message);
+  const review = createElement("section", { className: "backup-review", attributes: { "aria-live": "polite" } });
+  review.hidden = true;
+  const reviewHeading = createElement("h4", { text: "Review backup contents" });
+  const reviewMeta = createElement("p", { className: "form-note" });
+  const counts = createElement("dl", { className: "backup-counts" });
+  const confirmLabel = createElement("label", { className: "backup-confirm" });
+  const confirm = createElement("input", { attributes: { type: "checkbox" } });
+  confirmLabel.append(confirm, createElement("span", { text: "I understand this will replace all local Points Tracker data in this browser." }));
+  const restoreButton = createElement("button", {
+    className: "button button--danger",
+    text: "Replace local data",
+    attributes: { type: "button", disabled: "" }
+  });
+  review.append(reviewHeading, reviewMeta, counts, confirmLabel, restoreButton);
+  card.append(review);
+
+  let pendingBackup;
+  exportButton.addEventListener("click", async () => {
+    exportButton.disabled = true;
+    showFormMessage(message, "Preparing backup…", "progress");
+    try {
+      const backup = await createBackup();
+      const blob = new Blob([serializeBackup(backup)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const download = createElement("a", { attributes: { href: url, download: backupFilename(localDateString()) } });
+      document.body.append(download);
+      download.click();
+      download.remove();
+      URL.revokeObjectURL(url);
+      showFormMessage(message, "Backup downloaded.", "success");
+    } catch (error) {
+      console.error("Could not export backup", error);
+      showFormMessage(message, error.message);
+    } finally {
+      exportButton.disabled = false;
+    }
+  });
+
+  fileInput.addEventListener("change", async () => {
+    pendingBackup = undefined;
+    confirm.checked = false;
+    restoreButton.disabled = true;
+    review.hidden = true;
+    const [file] = fileInput.files;
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      showFormMessage(message, "Backup file is larger than 10 MB.");
+      return;
+    }
+    showFormMessage(message, "Validating backup…", "progress");
+    try {
+      pendingBackup = parseBackup(await file.text());
+      const summary = summarizeBackup(pendingBackup);
+      const labels = {
+        users: "Profiles",
+        weighIns: "Weigh-ins",
+        foods: "Foods",
+        foodAliases: "Food aliases",
+        recipes: "Recipes",
+        diaryEntries: "Diary entries",
+        settings: "Settings"
+      };
+      counts.replaceChildren();
+      Object.entries(summary).forEach(([storeName, count]) => counts.append(
+        createElement("dt", { text: labels[storeName] }),
+        createElement("dd", { text: String(count) })
+      ));
+      reviewMeta.textContent = `Exported ${new Date(pendingBackup.exportedAt).toLocaleString("en-AU")}. No data has been changed yet.`;
+      review.hidden = false;
+      showFormMessage(message, "Backup is valid. Review the contents before confirming.", "success");
+    } catch (error) {
+      console.warn("Backup validation rejected the selected file", error);
+      showFormMessage(message, error.message);
+    }
+  });
+
+  confirm.addEventListener("change", () => {
+    restoreButton.disabled = !(pendingBackup && confirm.checked);
+  });
+  restoreButton.addEventListener("click", async () => {
+    if (!pendingBackup || !confirm.checked) return;
+    restoreButton.disabled = true;
+    fileInput.disabled = true;
+    showFormMessage(message, "Restoring backup…", "progress");
+    try {
+      await restoreBackup(pendingBackup);
+      showingUserForm = false;
+      showingFoodForm = false;
+      showingDiaryForm = false;
+      showingRecipeForm = false;
+      window.location.hash = "today";
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not restore backup", error);
+      showFormMessage(message, error.message);
+      fileInput.disabled = false;
+      restoreButton.disabled = false;
+    }
+  });
+
+  return card;
+}
+
 function renderSettingsScreen(state) {
   const screen = createElement("section", { className: "screen" });
   screen.append(createScreenHeader("Settings", `Profile and weigh-ins for ${state.currentUser.name}.`));
@@ -445,7 +581,8 @@ function renderSettingsScreen(state) {
   grid.append(
     createWeighInForm(state),
     createTargetForm(state),
-    createWeighInHistory(state.weighIns)
+    createWeighInHistory(state.weighIns),
+    createBackupCard({ canExport: true })
   );
   screen.append(grid);
   return screen;

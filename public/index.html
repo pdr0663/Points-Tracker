@@ -17,9 +17,13 @@
           <p class="eyebrow">Household tracker</p>
           <h1>ProPoints</h1>
         </div>
-        <button class="profile-button" type="button" disabled aria-label="Household profiles will be available in milestone 3">
-          Profiles
-        </button>
+        <div class="profile-controls">
+          <label class="visually-hidden" for="profile-switcher">Current household profile</label>
+          <select id="profile-switcher" disabled>
+            <option>Set up profile</option>
+          </select>
+          <button id="add-profile" type="button" hidden>Add profile</button>
+        </div>
       </div>
     </header>
 

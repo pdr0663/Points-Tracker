@@ -154,7 +154,7 @@ export function createOpenAIService(config, options = {}) {
         prompt: prompts.label,
         content: [
           { type: "input_text", text: "Extract the visible nutrition label." },
-          { type: "input_image", image_url: `data:${contentType};base64,${image.toString("base64")}` }
+          { type: "input_image", image_url: `data:${contentType};base64,${image.toString("base64")}`, detail: "high" }
         ],
         validate: validateFoodLabel
       });

@@ -125,6 +125,37 @@ export function validateFoodInterpretation(value) {
   return value;
 }
 
+export function validateFoodLabel(value) {
+  requireExactKeys(value, ["type", "name", "brand", "serving", "nutritionPer100g"], "Nutrition label");
+  if (value.type !== "food") throw new AiRequestError("AI_INVALID_RESPONSE", "Nutrition label has the wrong type.");
+  requireNullableText(value.name, "Food name");
+  requireNullableText(value.brand, "Food brand");
+  if (value.serving !== null) {
+    requireExactKeys(value.serving, ["description", "grams"], "Food serving");
+    requireText(value.serving.description, "Food serving description");
+    requireNullablePositiveNumber(value.serving.grams, "Food serving grams");
+  }
+  requireExactKeys(value.nutritionPer100g, ["protein", "carbohydrate", "fat", "fibre"], "Nutrition per 100 g");
+  for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
+    requireNutrient(value.nutritionPer100g[nutrient], nutrient);
+  }
+  return value;
+}
+
+export function foodDraftFromLabel(value) {
+  const label = validateFoodLabel(value);
+  return {
+    name: label.name ?? "",
+    brand: label.brand ?? "",
+    nutritionPer100g: { ...label.nutritionPer100g },
+    servings: label.serving ? [{
+      description: label.serving.description,
+      grams: label.serving.grams ?? ""
+    }] : [],
+    source: "nutrition-label"
+  };
+}
+
 export function foodDraftFromInterpretation(value) {
   const interpretation = validateFoodInterpretation(value);
   const { nutrition } = interpretation;
@@ -160,18 +191,18 @@ export function createAiClient(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new TypeError("A fetch implementation is required.");
 
-  async function request(path, init = {}) {
+  async function request(path, init = {}, messages = {}) {
     let response;
     try {
       response = await fetchImpl(`${baseUrl}${path}`, init);
     } catch (error) {
-      throw new AiRequestError("NETWORK_ERROR", "AI assistance could not reach the server. Your original text has been kept.", { cause: error });
+      throw new AiRequestError("NETWORK_ERROR", messages.network ?? "AI assistance could not reach the server. Your original text has been kept.", { cause: error });
     }
     let body;
     try {
       body = await response.json();
     } catch (error) {
-      throw new AiRequestError("AI_REQUEST_FAILED", "AI assistance is unavailable from this site. Your original text has been kept.", { cause: error });
+      throw new AiRequestError("AI_REQUEST_FAILED", messages.unavailable ?? "AI assistance is unavailable from this site. Your original text has been kept.", { cause: error });
     }
     if (!response.ok) {
       const serverError = body?.error;
@@ -219,8 +250,26 @@ export function createAiClient(options = {}) {
         method: "POST",
         headers: { "Content-Type": audio.type || "audio/webm" },
         body: audio
+      }, {
+        network: "AI assistance could not reach the server. Your diary has not changed.",
+        unavailable: "Voice transcription is unavailable from this site. Your diary has not changed."
       });
       return validateTranscription(result);
+    },
+    async scanLabel(image) {
+      const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+      if (!(image instanceof Blob) || !image.size) throw new TypeError("A non-empty nutrition-label image is required.");
+      if (!acceptedTypes.has(image.type)) throw new TypeError("Choose a JPEG, PNG, or WebP image.");
+      if (image.size > 8 * 1024 * 1024) throw new RangeError("The nutrition-label image must be 8 MiB or smaller.");
+      const result = await request("/api/scan-label", {
+        method: "POST",
+        headers: { "Content-Type": image.type },
+        body: image
+      }, {
+        network: "AI assistance could not reach the server. No food has been saved.",
+        unavailable: "Nutrition-label scanning is unavailable from this site. No food has been saved."
+      });
+      return validateFoodLabel(result);
     }
   });
 }

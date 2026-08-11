@@ -91,6 +91,7 @@ test("label scanning sends an image data URL and preserves null fibre", async ()
   assert.equal(result.nutritionPer100g.fibre, null);
   assert.equal(body.model, "test-vision-model");
   assert.match(body.input[0].content[1].image_url, /^data:image\/png;base64,/u);
+  assert.equal(body.input[0].content[1].detail, "high");
 });
 
 test("transcription sends a server-side multipart request", async () => {

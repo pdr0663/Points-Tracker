@@ -4,6 +4,7 @@ import {
   createAiClient,
   createAiResolutions,
   foodDraftFromInterpretation,
+  foodDraftFromLabel,
   matchFood,
   suggestAiPortion
 } from "./ai.js";
@@ -39,6 +40,7 @@ import {
   searchFoods,
   updateFood
 } from "./foods.js";
+import { requiredFormNumber } from "./form-values.js";
 import { roundPoints } from "./points.js";
 import { createWeightChartModel, getProgressSummary } from "./progress.js";
 import {
@@ -165,9 +167,7 @@ function showFormMessage(messageElement, message, type = "error") {
 }
 
 function numberValue(formData, name) {
-  const value = Number(formData.get(name));
-  if (!Number.isFinite(value)) throw new TypeError(`${name} must be a number.`);
-  return value;
+  return requiredFormNumber(formData.get(name), name);
 }
 
 async function loadUserState() {
@@ -1165,7 +1165,9 @@ function finishAiFoodWorkflow(food, options = {}) {
   const action = options.created === false ? "selected" : "added";
   if (workflow?.origin === "recipe") recipeNotice = `${food.name} ${action} and matched to the recipe.`;
   else if (workflow?.origin === "meal") diaryNotice = `${food.name} ${action} and matched to the meal.`;
-  else foodNotice = `${food.name} created with AI assistance.`;
+  else foodNotice = workflow?.mode === "label"
+    ? `${food.name} created from the reviewed nutrition label.`
+    : `${food.name} created with AI assistance.`;
   if (window.location.hash !== `#${route}`) window.location.hash = route;
   else void renderCurrentRoute();
 }
@@ -1264,22 +1266,112 @@ function createAiFoodInputCard(workflow) {
   return card;
 }
 
+function createLabelScanCard(workflow) {
+  const card = createElement("section", { className: "card form-card label-scan-card" });
+  card.append(
+    createElement("h3", { text: "Scan a nutrition label" }),
+    createElement("p", { text: "Take a clear, upright photo or choose an existing image. Extracted values will be shown in the ordinary food form for review." })
+  );
+  const message = createFormMessage();
+  if (workflow.errorMessage) showFormMessage(message, workflow.errorMessage);
+  else if (workflow.labelState === "uploading") showFormMessage(message, "Uploading and reading nutrition label…", "progress");
+
+  const inputs = createElement("div", { className: "form-actions label-scan-actions" });
+  const makeFileAction = ({ text, capture, ariaLabel }) => {
+    const label = createElement("label", { className: "button button--secondary label-image-button", text });
+    const input = createElement("input", {
+      className: "visually-hidden",
+      attributes: {
+        type: "file",
+        accept: "image/jpeg,image/png,image/webp",
+        capture,
+        "aria-label": ariaLabel,
+        disabled: workflow.labelState === "uploading" ? "" : undefined
+      }
+    });
+    input.addEventListener("change", async () => {
+      const image = input.files?.[0];
+      if (!image) return;
+      workflow.imageName = image.name || "Captured nutrition label";
+      workflow.errorMessage = "";
+      workflow.labelState = "uploading";
+      await renderCurrentRoute();
+      try {
+        workflow.interpretation = await aiClient.scanLabel(image);
+        workflow.draft = foodDraftFromLabel(workflow.interpretation);
+        workflow.duplicateApproved = false;
+        workflow.stage = "review";
+        await renderCurrentRoute();
+      } catch (error) {
+        console.error("Could not scan nutrition label", error);
+        workflow.labelState = "error";
+        workflow.errorMessage = error.message;
+        await renderCurrentRoute();
+      }
+    });
+    label.append(input);
+    return label;
+  };
+  inputs.append(
+    makeFileAction({ text: "Take photo", capture: "environment", ariaLabel: "Take a nutrition label photo" }),
+    makeFileAction({ text: "Choose image", ariaLabel: "Choose a nutrition label image" })
+  );
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", leaveAiFoodWorkflow);
+  inputs.append(cancel);
+  card.append(message, inputs);
+  return card;
+}
+
+function missingLabelValues(interpretation) {
+  if (!interpretation) return [];
+  const missing = [];
+  if (interpretation.name === null) missing.push("food name");
+  if (interpretation.brand === null) missing.push("brand");
+  if (interpretation.serving === null) missing.push("serving description and weight");
+  else if (interpretation.serving.grams === null) missing.push("serving weight");
+  for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
+    if (interpretation.nutritionPer100g[nutrient] === null) missing.push(`${nutrient} per 100 g`);
+  }
+  return missing;
+}
+
 function createFoodForm(food, options = {}) {
   const initialFood = food ?? options.initialFood;
   const aiWorkflow = options.aiWorkflow;
   const card = createElement("section", { className: "card form-card food-form-card" });
-  card.append(createElement("h3", { text: food ? `Edit ${food.name}` : aiWorkflow ? "Review AI-assisted food" : "Add food" }));
+  card.append(createElement("h3", {
+    text: food
+      ? `Edit ${food.name}`
+      : aiWorkflow?.mode === "label" ? "Review scanned nutrition label" : aiWorkflow ? "Review AI-assisted food" : "Add food"
+  }));
   if (aiWorkflow) {
+    const isLabelScan = aiWorkflow.mode === "label";
     card.append(
       createElement("p", {
         className: aiWorkflow.mode === "estimate" ? "ai-estimate-notice" : "notice",
         text: aiWorkflow.mode === "estimate"
           ? "AI estimate — review and edit every nutritional value before creating this food."
-          : "AI extracted these values from your text. Check them against the source before creating this food."
-      }),
-      createElement("p", { className: "ai-original-label", text: "Original text" }),
-      createElement("blockquote", { className: "ai-original-text", text: aiWorkflow.text })
+          : isLabelScan
+            ? "AI extracted these factual values from the label. Check every value against the image before creating this food."
+            : "AI extracted these values from your text. Check them against the source before creating this food."
+      })
     );
+    if (isLabelScan) {
+      card.append(createElement("p", { className: "ai-original-text", text: `Image: ${aiWorkflow.imageName || "nutrition label"}` }));
+      const missing = missingLabelValues(aiWorkflow.interpretation);
+      if (missing.length) {
+        card.append(createElement("p", {
+          className: "label-missing-notice",
+          text: `Not found on the label: ${missing.join(", ")}. Complete required blank values before saving; the optional brand may remain blank.`
+        }));
+      }
+    } else {
+      card.append(
+        createElement("p", { className: "ai-original-label", text: "Original text" }),
+        createElement("blockquote", { className: "ai-original-text", text: aiWorkflow.text })
+      );
+    }
     if (initialFood?.nutritionBasis === "per-serving") {
       const originalNutrition = aiWorkflow.interpretation.nutrition;
       const originalValues = ["protein", "carbohydrate", "fat", "fibre"]
@@ -1308,6 +1400,27 @@ function createFoodForm(food, options = {}) {
     createField({ label: "Fat /100 g", name: "fat", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.fat ?? "" }),
     createField({ label: "Fibre /100 g", name: "fibre", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.fibre ?? "" })
   );
+  if (aiWorkflow?.mode === "label") {
+    const fieldToValue = {
+      name: aiWorkflow.interpretation.name,
+      protein: aiWorkflow.interpretation.nutritionPer100g.protein,
+      carbohydrate: aiWorkflow.interpretation.nutritionPer100g.carbohydrate,
+      fat: aiWorkflow.interpretation.nutritionPer100g.fat,
+      fibre: aiWorkflow.interpretation.nutritionPer100g.fibre
+    };
+    Object.entries(fieldToValue).forEach(([name, value]) => {
+      if (value !== null) return;
+      const input = fields.querySelector(`[name="${name}"]`);
+      const field = input?.closest(".form-field");
+      field?.classList.add("form-field--missing");
+      input?.setAttribute("aria-invalid", "true");
+      input?.addEventListener("input", () => {
+        if (!input.value.trim()) return;
+        field?.classList.remove("form-field--missing");
+        input.removeAttribute("aria-invalid");
+      });
+    });
+  }
 
   const servingSection = createElement("fieldset", { className: "serving-editor" });
   servingSection.append(createElement("legend", { text: "Named servings" }));
@@ -1316,6 +1429,31 @@ function createFoodForm(food, options = {}) {
   initialServings.forEach((serving, index) => {
     servingRows.append(createServingRow(serving, food ? serving.id === food.defaultServingId : index === 0));
   });
+  if (aiWorkflow?.mode === "label") {
+    const firstRow = servingRows.querySelector(".serving-row");
+    const labelServing = aiWorkflow.interpretation.serving;
+    if (labelServing === null) {
+      firstRow?.classList.add("serving-row--missing");
+      const missingInputs = firstRow ? [...firstRow.querySelectorAll("input[type='text'], input[type='number']")] : [];
+      missingInputs.forEach((input) => {
+        input.setAttribute("aria-invalid", "true");
+        input.addEventListener("input", () => {
+          if (missingInputs.some((candidate) => !candidate.value.trim())) return;
+          firstRow.classList.remove("serving-row--missing");
+          missingInputs.forEach((candidate) => candidate.removeAttribute("aria-invalid"));
+        });
+      });
+    } else if (labelServing.grams === null) {
+      firstRow?.classList.add("serving-row--missing");
+      const gramsInput = firstRow?.querySelector("[data-serving-grams]");
+      gramsInput?.setAttribute("aria-invalid", "true");
+      gramsInput?.addEventListener("input", () => {
+        if (!gramsInput.value.trim()) return;
+        firstRow.classList.remove("serving-row--missing");
+        gramsInput.removeAttribute("aria-invalid");
+      });
+    }
+  }
   const addServing = createElement("button", {
     className: "button button--secondary",
     text: "Add serving",
@@ -1337,7 +1475,9 @@ function createFoodForm(food, options = {}) {
       const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing };
       calculation.textContent = `${displayPoints(foodPointsPer100g(preview))} PP per 100 g · ${displayPoints(foodPointsForDefaultServing(preview))} PP per ${defaultServing.description || "default serving"}`;
     } catch {
-      calculation.textContent = "Enter nutrition and a default serving to calculate Points.";
+      calculation.textContent = aiWorkflow?.mode === "label"
+        ? "Points cannot be calculated until all four per-100-g nutrition values and a default serving are completed."
+        : "Enter nutrition and a default serving to calculate Points.";
     }
   }
   form.addEventListener("input", updateCalculation);
@@ -1400,7 +1540,7 @@ function createFoodForm(food, options = {}) {
     showFormMessage(message, "Saving food…", "progress");
     try {
       const input = foodInputFromForm(form);
-      if (aiWorkflow) input.source = aiWorkflow.interpretation.provenance;
+      if (aiWorkflow) input.source = aiWorkflow.mode === "label" ? "nutrition-label" : aiWorkflow.interpretation.provenance;
       const saved = food ? await updateFood(food.id, input) : await createFood(input);
       showingFoodForm = false;
       editingFoodId = undefined;
@@ -1528,7 +1668,15 @@ function renderFoodsScreen(foods, aliases) {
     aiFoodWorkflow = { stage: "input", text: "", mode: "extract" };
     void renderCurrentRoute();
   });
-  headerActions.append(addFood, addFoodWithAi);
+  const scanLabel = createElement("button", { className: "button button--secondary", text: "Scan nutrition label", attributes: { type: "button" } });
+  scanLabel.addEventListener("click", () => {
+    showingFoodForm = false;
+    editingFoodId = undefined;
+    pendingDeleteFoodId = undefined;
+    aiFoodWorkflow = { stage: "label", labelState: "idle", mode: "label" };
+    void renderCurrentRoute();
+  });
+  headerActions.append(addFood, addFoodWithAi, scanLabel);
   header.append(headerActions);
   screen.append(header);
 
@@ -1546,6 +1694,8 @@ function renderFoodsScreen(foods, aliases) {
   if (aiFoodWorkflow) {
     if (aiFoodWorkflow.stage === "input") {
       screen.append(createAiFoodInputCard(aiFoodWorkflow));
+    } else if (aiFoodWorkflow.stage === "label") {
+      screen.append(createLabelScanCard(aiFoodWorkflow));
     } else {
       const match = aiFoodWorkflow.draft.name
         ? matchFood(aiFoodWorkflow.draft.name, foods, aliases)

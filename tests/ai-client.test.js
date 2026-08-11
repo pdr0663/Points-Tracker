@@ -6,7 +6,9 @@ import {
   createAiClient,
   createAiResolutions,
   foodDraftFromInterpretation,
+  foodDraftFromLabel,
   matchFood,
+  validateFoodLabel,
   validateFoodInterpretation,
   validateMealInterpretation,
   validateRecipeInterpretation,
@@ -100,6 +102,45 @@ test("AI client uploads one raw recording and validates the transcript", async (
   assert.equal(request.init.body, audio);
   assert.throws(() => validateTranscription({ transcript: "two eggs", extra: true }), { code: "AI_INVALID_RESPONSE" });
   await assert.rejects(client.transcribe(new Blob([])), TypeError);
+});
+
+test("AI client uploads a bounded label image and preserves unknown values", async () => {
+  let request;
+  const response = {
+    type: "food",
+    name: "Greek yoghurt",
+    brand: "Example",
+    serving: { description: "1 tub", grams: 170 },
+    nutritionPer100g: { protein: 9.5, carbohydrate: 6.2, fat: 2.8, fibre: null }
+  };
+  const client = createAiClient({
+    fetchImpl: async (url, init) => {
+      request = { url, init };
+      return new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } });
+    }
+  });
+  const image = new Blob(["image bytes"], { type: "image/jpeg" });
+  assert.equal((await client.scanLabel(image)).nutritionPer100g.fibre, null);
+  assert.equal(request.url, "/api/scan-label");
+  assert.equal(request.init.headers["Content-Type"], "image/jpeg");
+  assert.equal(request.init.body, image);
+  assert.deepEqual(foodDraftFromLabel(response), {
+    name: "Greek yoghurt",
+    brand: "Example",
+    nutritionPer100g: { protein: 9.5, carbohydrate: 6.2, fat: 2.8, fibre: null },
+    servings: [{ description: "1 tub", grams: 170 }],
+    source: "nutrition-label"
+  });
+  assert.throws(() => validateFoodLabel({ ...response, points: 4 }), { code: "AI_INVALID_RESPONSE" });
+});
+
+test("label scanning rejects unsupported, empty, and oversized images before upload", async () => {
+  let calls = 0;
+  const client = createAiClient({ fetchImpl: async () => { calls += 1; } });
+  await assert.rejects(client.scanLabel(new Blob([])), TypeError);
+  await assert.rejects(client.scanLabel(new Blob(["image"], { type: "image/gif" })), TypeError);
+  await assert.rejects(client.scanLabel(new Blob([new Uint8Array(8 * 1024 * 1024 + 1)], { type: "image/png" })), RangeError);
+  assert.equal(calls, 0);
 });
 
 test("AI food client sends explicit mode and validates server-owned provenance", async () => {

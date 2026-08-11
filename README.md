@@ -1,13 +1,13 @@
 # Points Tracker
 
-A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional and is not part of the current M0–M9 checkpoint.
+A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional; M10 provides the server-side boundary, while its browser workflows arrive in M11–M13.
 
 ## Requirements
 
 - Node.js 20 or newer
 - A current browser with IndexedDB support
 
-There are currently no third-party runtime dependencies.
+There are no third-party runtime dependencies.
 
 ## Local installation
 
@@ -21,7 +21,30 @@ npm start
 
 Then open <http://localhost:3000>.
 
-The `.env` file is reserved for the later optional AI backend. Never place the OpenAI API key in files under `public/js`.
+The application works without an API key. To enable the optional AI backend, put the key only in the root `.env` file:
+
+```text
+OPENAI_API_KEY=your-key-here
+```
+
+The server loads `.env` during local startup. Never place the OpenAI API key in `public/`, browser JavaScript, a Git commit, or GitHub Pages configuration.
+
+The model names have low-cost defaults and can be changed with `OPENAI_TEXT_MODEL`, `OPENAI_VISION_MODEL`, and `OPENAI_TRANSCRIPTION_MODEL`. If the static site and API are hosted on different origins, set `APP_ORIGIN` to the exact browser origin, without a trailing slash. This enables CORS for that origin only.
+
+`GET /api/health` reports whether AI is configured without testing the key or returning it. It does not incur an OpenAI request.
+
+## AI API
+
+The M10 server exposes:
+
+- `POST /api/interpret-meal` — JSON: `{ "text": "..." }`
+- `POST /api/interpret-recipe` — JSON: `{ "text": "..." }`
+- `POST /api/transcribe` — raw audio bytes with an `audio/*` content type
+- `POST /api/scan-label` — raw JPEG, PNG, or WebP bytes with the matching `image/*` content type
+
+Text requests are limited to 64 KiB, images to 8 MiB, and audio to 20 MiB by default. Model output is requested with strict JSON schemas and then validated again by the server. The schemas exclude Points values; all Points calculations remain in deterministic browser code.
+
+The AI endpoints are deliberately optional. A missing key or an OpenAI failure returns a JSON error and does not affect local tracking. The server does not yet provide user authentication, so do not expose it as a public, chargeable API. Authentication must be added before an internet-accessible deployment.
 
 ## Appearance
 
@@ -67,14 +90,15 @@ Implemented milestones:
 - M7: reusable recipes with explicit ingredients, gram-normalized quantities, named servings, live total/per-serving calculations, fractional diary servings, frozen diary snapshots, and reference-protected deletion
 - M8: goal progress with unclamped numerical and clamped visual percentages, sensible weight milestones, current and completed weigh-in periods, and a responsive SVG weight-history chart
 - M9: complete JSON export, strict import validation and review, explicit replacement confirmation, and transactional all-store restore
+- M10: optional server-side OpenAI boundary, strict structured-output schemas and validation, upload and request limits, health reporting, controlled cross-origin access, and consistent errors
 
-AI workflows intentionally remain placeholders until their assigned milestones.
+The browser AI review workflows intentionally remain placeholders until M11–M13.
 
 ## Architecture
 
 The browser application is organized as ES modules under `public/js`. `points.js` contains pure deterministic calculations with no UI or database dependencies. `db.js` owns all raw IndexedDB interaction and versioned schema migrations. `users.js` owns profile selection, user creation, target updates and weigh-in allowance snapshots. `foods.js` owns food validation, safe name normalization, named servings, point calculations, search and protected deletion. `recipes.js` owns ingredient normalization, recipe calculations, search and protected deletion. `diary.js` owns food and recipe snapshots, user/date isolation, daily totals, historical daily budgets and weekly-extra calculations. `progress.js` owns goal, milestone, weigh-in-period and chart-data calculations. `backup.js` owns portable export, validation, summaries, filenames, and transactional restore. Screens use those modules through feature-level services as later milestones are added.
 
-The development server in `server/index.js` currently serves the static application. Later AI routes will remain optional and will call OpenAI only from the server:
+The development server in `server/index.js` serves the static application and the optional API routes. All OpenAI-specific requests are isolated in `server/openai.js`:
 
 ```text
 Browser and IndexedDB
@@ -88,6 +112,8 @@ OpenAI API
 ```
 
 Normal tracking must continue working if the AI API is unavailable.
+
+`server/schemas.js` defines the structured-output contracts. `server/validation.js` independently validates request data and every model-produced object before it can reach browser code. Audio and image uploads are accepted as bounded raw request bodies, avoiding unnecessary upload middleware.
 
 ## Data storage
 

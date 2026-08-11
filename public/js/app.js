@@ -1,14 +1,5 @@
 import { openDatabase } from "./db.js";
 import {
-  calculateAiResolution,
-  createAiClient,
-  createAiResolutions,
-  foodDraftFromInterpretation,
-  foodDraftFromLabel,
-  matchFood,
-  suggestAiPortion
-} from "./ai.js";
-import {
   backupFilename,
   createBackup,
   MAX_BACKUP_BYTES,
@@ -19,7 +10,6 @@ import {
 } from "./backup.js";
 import {
   createDiaryEntry,
-  createDiaryEntries,
   deleteDiaryEntry,
   duplicateDiaryEntry,
   getDiarySummary,
@@ -35,7 +25,6 @@ import {
   foodPointsForDefaultServing,
   foodPointsForGrams,
   foodPointsPer100g,
-  listFoodAliases,
   normalizeFoodName,
   searchFoods,
   updateFood
@@ -53,6 +42,7 @@ import {
   updateRecipe
 } from "./recipes.js";
 import { createRouter } from "./router.js";
+import { JsonImportError, MAX_IMPORT_BYTES, parseImportText } from "./json-import.js";
 import {
   addWeighIn,
   createUserWithInitialWeighIn,
@@ -63,14 +53,10 @@ import {
   setCurrentUser,
   updateTargetWeight
 } from "./users.js";
-import { startVoiceRecording, voiceRecordingSupported } from "./voice.js";
 
 const main = document.querySelector("#main-content");
 const profileSwitcher = document.querySelector("#profile-switcher");
 const addProfileButton = document.querySelector("#add-profile");
-const aiClient = createAiClient({
-  baseUrl: document.querySelector('meta[name="points-tracker-api-base"]')?.content
-});
 
 let currentRoute;
 let showingUserForm = false;
@@ -92,9 +78,7 @@ let pendingDeleteRecipeId;
 let pendingRecipeDiaryId;
 let recipeSearchQuery = "";
 let recipeNotice;
-let aiMealWorkflow;
-let aiRecipeWorkflow;
-let aiFoodWorkflow;
+let jsonImportWorkflow;
 let renderSequence = 0;
 
 function createElement(tagName, options = {}) {
@@ -307,7 +291,7 @@ function createMetric(label, value, detail) {
   return metric;
 }
 
-function renderTodayScreen(state, summary, weekly, foods, aliases) {
+function renderTodayScreen(state, summary, weekly) {
   const { currentUser, weighIns } = state;
   const currentWeighIn = weighIns.at(-1);
   const screen = createElement("section", { className: "screen" });
@@ -325,37 +309,6 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
     )
   );
   screen.append(metrics);
-
-  if (aiMealWorkflow) {
-    const cancel = () => {
-      aiMealWorkflow?.recorder?.cancel();
-      aiMealWorkflow = undefined;
-      void renderCurrentRoute();
-    };
-    if (aiMealWorkflow.stage === "review") {
-      screen.append(createAiReviewCard("meal", aiMealWorkflow, foods, cancel, async (calculated) => {
-        const inputs = calculated.map((item) => ({
-          userId: state.currentUser.id,
-          date: summary.date,
-          meal: aiMealWorkflow.meal,
-          ...item.diaryInput
-        }));
-        await createDiaryEntries(inputs);
-        const count = inputs.length;
-        aiMealWorkflow = undefined;
-        selectedDiaryDate = summary.date;
-        diaryNotice = `${count} confirmed meal ${count === 1 ? "item" : "items"} added.`;
-        window.location.hash = "diary";
-      }, {
-        onAddMissingFood: (index, resolution) => startAiFoodForResolution("meal", index, resolution)
-      }));
-    } else if (aiMealWorkflow.stage === "voice") {
-      screen.append(createAiVoiceInputCard("meal", aiMealWorkflow, foods, aliases, cancel));
-    } else {
-      screen.append(createAiTextInputCard("meal", aiMealWorkflow, foods, aliases, cancel));
-    }
-    return screen;
-  }
 
   const week = createElement("article", { className: "card card--accent today-week" });
   week.append(
@@ -376,34 +329,6 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
   );
 
   const actions = createElement("div", { className: "today-actions" });
-  const tellAi = createElement("button", {
-    className: "button button--secondary",
-    text: "Tell me what I ate",
-    attributes: {
-      type: "button",
-      disabled: foods.length ? undefined : "",
-      title: foods.length ? "Interpret a meal and match it to saved foods." : "Add saved foods before using AI meal entry."
-    }
-  });
-  tellAi.addEventListener("click", () => {
-    aiMealWorkflow = { stage: "input", text: "", meal: "breakfast" };
-    void renderCurrentRoute();
-  });
-  const recordMeal = createElement("button", {
-    className: "button button--secondary",
-    text: "Record meal",
-    attributes: {
-      type: "button",
-      disabled: foods.length && voiceRecordingSupported() ? undefined : "",
-      title: !voiceRecordingSupported()
-        ? "Voice recording is not supported by this browser."
-        : foods.length ? "Record a meal description, then review it before saving." : "Add saved foods before using AI meal entry."
-    }
-  });
-  recordMeal.addEventListener("click", () => {
-    aiMealWorkflow = { stage: "voice", voiceState: "idle", text: "", transcript: "", meal: "breakfast" };
-    void renderCurrentRoute();
-  });
   const addEntry = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button" } });
   addEntry.addEventListener("click", () => {
     selectedDiaryDate = summary.date;
@@ -422,7 +347,7 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
     progressView = "weekly";
     window.location.hash = "progress";
   });
-  actions.append(tellAi, recordMeal, addEntry, viewDiary, viewWeek);
+  actions.append(addEntry, viewDiary, viewWeek);
   screen.append(week, actions);
   return screen;
 }
@@ -663,398 +588,165 @@ function displayPoints(rawPoints) {
   return String(roundPoints(rawPoints));
 }
 
-function createAiTextInputCard(kind, workflow, foods, aliases, onCancel) {
-  const isMeal = kind === "meal";
-  const card = createElement("section", { className: "card form-card ai-input-card" });
-  card.append(
-    createElement("h3", { text: isMeal ? "Describe what you ate" : "Paste or type a recipe" }),
+function startJsonImport(expectedType) {
+  jsonImportWorkflow = { expectedType, stage: "paste", text: "", error: undefined };
+  void renderCurrentRoute();
+}
+
+function cancelJsonImport() {
+  jsonImportWorkflow = undefined;
+  void renderCurrentRoute();
+}
+
+function importTypeLabel(type) {
+  return type === "food-import" ? "food" : "recipe";
+}
+
+function createImportFoodPreview(food) {
+  const item = createElement("article", { className: "import-preview__food" });
+  const heading = createElement("h4", { text: food.name });
+  if (food.brand) heading.append(createElement("span", { className: "import-preview__brand", text: ` · ${food.brand}` }));
+  item.append(
+    heading,
     createElement("p", {
-      text: isMeal
-        ? "Use ordinary language. The interpretation will be matched to your saved foods and shown for review."
-        : "Include the recipe name, serving count, ingredients, quantities and units. Nothing will be saved before review."
+      className: "import-preview__source",
+      text: food.source.kind === "afcd" ? `AFCD reference · ${food.source.foodId}` : "External JSON nutrition"
     })
   );
-  const form = createElement("form", { className: "data-form" });
-  if (isMeal) {
-    form.append(createField({
-      label: "Meal",
-      name: "aiMeal",
-      value: workflow.meal,
-      options: MEALS.map((meal) => ({ value: meal, label: mealLabel(meal) }))
+  if (food.nutritionPer100g) {
+    const nutrition = food.nutritionPer100g;
+    item.append(createElement("p", {
+      text: `Per 100 g: protein ${nutrition.protein} g · carbohydrate ${nutrition.carbohydrate} g · fat ${nutrition.fat} g · fibre ${nutrition.fibre} g`
     }));
   }
-  const textField = createElement("div", { className: "form-field" });
-  const textId = `ai-${kind}-text`;
-  const label = createElement("label", {
-    text: isMeal ? "What did you eat?" : "Recipe text",
-    attributes: { for: textId }
-  });
-  const textarea = createElement("textarea", {
-    attributes: {
-      id: textId,
-      name: "aiText",
-      rows: isMeal ? "4" : "9",
-      maxlength: "20000",
-      required: "",
-      placeholder: isMeal
-        ? "Two slices of bread with ten grams of butter"
-        : "Chicken casserole, serves four: 500 g chicken thighs…"
-    }
-  });
-  textarea.value = workflow.text;
-  textarea.addEventListener("input", () => { workflow.text = textarea.value; });
-  textField.append(label, textarea);
-  const message = createFormMessage();
-  const actions = createElement("div", { className: "form-actions" });
-  const submit = createElement("button", {
-    className: "button button--primary",
-    text: isMeal ? "Interpret meal" : "Interpret recipe",
-    attributes: { type: "submit" }
-  });
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
-  cancel.addEventListener("click", onCancel);
-  actions.append(submit, cancel);
-  form.append(textField, message, actions);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const values = new FormData(form);
-    workflow.text = String(values.get("aiText") ?? "").trim();
-    if (isMeal) workflow.meal = values.get("aiMeal");
-    submit.disabled = true;
-    showFormMessage(message, "Interpreting with AI…", "progress");
-    try {
-      const interpretation = isMeal
-        ? await aiClient.interpretMeal(workflow.text)
-        : await aiClient.interpretRecipe(workflow.text);
-      workflow.interpretation = interpretation;
-      workflow.resolutions = createAiResolutions(
-        isMeal ? interpretation.items : interpretation.ingredients,
-        foods,
-        aliases
-      );
-      workflow.recipeName = interpretation.name;
-      workflow.recipeServings = interpretation.servings;
-      workflow.stage = "review";
-      workflow.editing = false;
-      await renderCurrentRoute();
-    } catch (error) {
-      console.error(`Could not interpret ${kind}`, error);
-      showFormMessage(message, error.message);
-      submit.disabled = false;
-    }
-  });
-  card.append(form);
-  queueMicrotask(() => textarea.focus());
-  return card;
-}
-
-function voiceWorkflowIsCurrent(kind, workflow) {
-  return kind === "meal" ? aiMealWorkflow === workflow : aiRecipeWorkflow === workflow;
-}
-
-function createAiVoiceInputCard(kind, workflow, foods, aliases, onCancel) {
-  const isMeal = kind === "meal";
-  const card = createElement("section", { className: "card form-card ai-input-card ai-voice-card" });
-  card.append(
-    createElement("h3", { text: isMeal ? "Record what you ate" : "Record a recipe" }),
-    createElement("p", { text: "Recording starts only when you press the microphone button and stops when you press Stop." })
-  );
-
-  let mealSelect;
-  if (isMeal) {
-    const mealField = createField({
-      label: "Meal",
-      name: "aiVoiceMeal",
-      value: workflow.meal,
-      options: MEALS.map((meal) => ({ value: meal, label: mealLabel(meal) }))
-    });
-    mealSelect = mealField.querySelector("select");
-    mealSelect.disabled = workflow.voiceState !== "idle" && workflow.voiceState !== "error";
-    mealSelect.addEventListener("change", () => { workflow.meal = mealSelect.value; });
-    card.append(mealField);
+  if (food.servings.length) {
+    item.append(createElement("p", {
+      text: `Servings: ${food.servings.map((serving) => `${serving.description} (${serving.grams} g)`).join(", ")}`
+    }));
   }
+  return item;
+}
 
-  const stateText = {
-    idle: "Ready to record.",
-    recording: "Recording… Press Stop when you have finished.",
-    uploading: "Uploading recording…",
-    transcribing: "Transcribing audio…",
-    interpreting: `Interpreting ${isMeal ? "meal" : "recipe"}…`,
-    error: workflow.errorMessage ?? "Voice entry could not be completed."
-  }[workflow.voiceState] ?? "Ready to record.";
-  card.append(createElement("p", {
-    className: `voice-status voice-status--${workflow.voiceState}`,
-    text: stateText,
-    attributes: { role: "status", "aria-live": "polite" }
-  }));
-  if (workflow.transcript) {
+function createJsonImportCard(workflow) {
+  const label = importTypeLabel(workflow.expectedType);
+  const card = createElement("section", { className: "card form-card json-import-card" });
+
+  if (workflow.stage === "paste") {
     card.append(
-      createElement("p", { className: "ai-original-label", text: "Transcript" }),
-      createElement("blockquote", { className: "ai-original-text", text: workflow.transcript })
+      createElement("h3", { text: `Paste ${label} JSON` }),
+      createElement("p", { text: `Paste bare JSON or one Markdown json code block. Validation is local and the limit is ${MAX_IMPORT_BYTES / 1024} KiB.` })
     );
-  }
-
-  const actions = createElement("div", { className: "form-actions" });
-  if (["idle", "error"].includes(workflow.voiceState)) {
-    const record = createElement("button", {
-      className: "button button--primary voice-record-button",
-      text: "Start recording",
-      attributes: { type: "button" }
-    });
-    record.addEventListener("click", async () => {
-      record.disabled = true;
-      workflow.errorMessage = "";
-      if (isMeal) workflow.meal = mealSelect.value;
-      try {
-        const recorder = await startVoiceRecording();
-        if (!voiceWorkflowIsCurrent(kind, workflow)) {
-          recorder.cancel();
-          return;
-        }
-        workflow.recorder = recorder;
-        workflow.voiceState = "recording";
-        await renderCurrentRoute();
-      } catch (error) {
-        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
-        console.error("Could not start voice recording", error);
-        workflow.voiceState = "error";
-        workflow.errorMessage = error.message;
-        await renderCurrentRoute();
+    const form = createElement("form", { className: "data-form" });
+    const field = createElement("div", { className: "form-field" });
+    const textarea = createElement("textarea", {
+      attributes: {
+        id: `json-import-${label}`,
+        name: "jsonImport",
+        rows: "16",
+        required: "",
+        spellcheck: "false",
+        "aria-describedby": "json-import-help"
       }
     });
-    actions.append(record);
-  } else if (workflow.voiceState === "recording") {
-    const stop = createElement("button", { className: "button button--primary", text: "Stop recording", attributes: { type: "button" } });
-    stop.addEventListener("click", async () => {
-      stop.disabled = true;
-      const recorder = workflow.recorder;
-      try {
-        workflow.voiceState = "uploading";
-        await renderCurrentRoute();
-        const audio = await recorder.stop();
-        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
-        delete workflow.recorder;
-        workflow.voiceState = "transcribing";
-        await renderCurrentRoute();
-        const { transcript } = await aiClient.transcribe(audio);
-        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
-        workflow.transcript = transcript;
-        workflow.text = transcript;
-        workflow.voiceState = "interpreting";
-        await renderCurrentRoute();
-        const interpretation = isMeal
-          ? await aiClient.interpretMeal(transcript)
-          : await aiClient.interpretRecipe(transcript);
-        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
-        workflow.interpretation = interpretation;
-        workflow.resolutions = createAiResolutions(
-          isMeal ? interpretation.items : interpretation.ingredients,
-          foods,
-          aliases
-        );
-        workflow.recipeName = interpretation.name;
-        workflow.recipeServings = interpretation.servings;
-        workflow.stage = "review";
-        workflow.inputMethod = "voice";
-        workflow.editing = false;
-        await renderCurrentRoute();
-      } catch (error) {
-        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
-        delete workflow.recorder;
-        console.error(`Could not complete voice ${kind} entry`, error);
-        workflow.voiceState = "error";
-        workflow.errorMessage = error.message;
-        await renderCurrentRoute();
-      }
+    textarea.value = workflow.text;
+    textarea.addEventListener("input", () => {
+      workflow.text = textarea.value;
+      workflow.error = undefined;
     });
-    actions.append(stop);
+    field.append(
+      createElement("label", { text: `${label === "food" ? "Food" : "Recipe"} import JSON`, attributes: { for: textarea.id } }),
+      textarea,
+      createElement("p", { className: "field-help", text: "Explanatory text outside a JSON code block is not accepted.", attributes: { id: "json-import-help" } })
+    );
+    const message = createFormMessage();
+    if (workflow.error) {
+      showFormMessage(message, workflow.error.message);
+      const issues = workflow.error.details?.issues;
+      if (issues?.length) {
+        const list = createElement("ul", { className: "import-errors" });
+        issues.forEach((item) => list.append(createElement("li", { text: `${item.path}: ${item.message}` })));
+        message.append(list);
+      }
+    }
+    const actions = createElement("div", { className: "form-actions" });
+    const preview = createElement("button", { className: "button button--primary", text: "Preview", attributes: { type: "submit" } });
+    const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+    cancel.addEventListener("click", cancelJsonImport);
+    actions.append(preview, cancel);
+    form.append(field, message, actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      workflow.text = textarea.value;
+      try {
+        workflow.parsed = parseImportText(workflow.text, { expectedType: workflow.expectedType });
+        workflow.error = undefined;
+        workflow.stage = "preview";
+      } catch (error) {
+        if (!(error instanceof JsonImportError)) console.error("Could not validate pasted JSON", error);
+        workflow.error = error instanceof JsonImportError
+          ? error
+          : new JsonImportError("IMPORT_INVALID", "The import document could not be validated.");
+      }
+      void renderCurrentRoute();
+    });
+    card.append(form);
+    queueMicrotask(() => textarea.focus());
+    return card;
   }
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
-  cancel.addEventListener("click", onCancel);
-  actions.append(cancel);
-  card.append(actions);
-  return card;
-}
 
-function aiMatchText(resolution, calculated) {
-  if (!calculated.resolved) {
-    return resolution.foodId ? "Serving unresolved — choose how the quantity should be measured." : "Unresolved — choose a saved food.";
-  }
-  if (resolution.matchStatus === "exact") return "Exact saved-food match";
-  if (resolution.matchStatus === "alias") return "Matched through a saved alias";
-  if (resolution.matchStatus === "possible") return "Possible match — review before confirming";
-  return "Selected saved food";
-}
-
-function createAiReviewCard(kind, workflow, foods, onCancel, onConfirm, options = {}) {
-  const isMeal = kind === "meal";
-  const card = createElement("section", { className: "card form-card ai-review-card" });
+  const document = workflow.parsed.document;
   card.append(
-    createElement("h3", { text: isMeal ? "Review interpreted meal" : "Review interpreted recipe" }),
-    createElement("p", {
-      className: "ai-review-intro",
-      text: workflow.hasSavedFoods
-        ? `Confirmed missing foods have been saved to the shared food database. ${isMeal ? "No diary items" : "The recipe"} will be saved only after final confirmation.`
-        : "No data has been saved. Check every match and quantity before confirming."
-    }),
-    createElement("p", { className: "ai-original-label", text: workflow.inputMethod === "voice" ? "Transcript" : "Original text" }),
-    createElement("blockquote", { className: "ai-original-text", text: workflow.text })
+    createElement("h3", { text: `Review ${label} import` }),
+    createElement("p", { className: "notice", text: "Valid Version 1 document. No application data has been changed." })
   );
+  const overview = createElement("dl", { className: "import-preview__overview" });
+  const rows = [["Document type", document.type], ["Schema version", document.schemaVersion]];
+  if (document.type === "food-import") rows.push(["Food", document.food.name]);
+  else rows.push(
+    ["Recipe", document.recipe.name],
+    ["Recipe servings", document.recipe.servings],
+    ["Bundled foods", document.foods.length],
+    ["Ingredients", document.recipe.ingredients.length]
+  );
+  rows.forEach(([term, value]) => overview.append(createElement("dt", { text: term }), createElement("dd", { text: String(value) })));
+  card.append(overview);
 
-  let nameInput;
-  let servingsInput;
-  if (!isMeal) {
-    const recipeFields = createElement("div", { className: "form-grid ai-recipe-fields" });
-    const nameField = createField({ label: "Recipe name", name: "aiRecipeName", value: workflow.recipeName });
-    const servingsField = createField({ label: "Servings", name: "aiRecipeServings", type: "number", min: "0.1", step: "0.1", value: workflow.recipeServings });
-    nameInput = nameField.querySelector("input");
-    servingsInput = servingsField.querySelector("input");
-    nameInput.disabled = !workflow.editing;
-    servingsInput.disabled = !workflow.editing;
-    nameInput.addEventListener("input", () => { workflow.recipeName = nameInput.value; refresh(); });
-    servingsInput.addEventListener("input", () => { workflow.recipeServings = Number(servingsInput.value); refresh(); });
-    recipeFields.append(nameField, servingsField);
-    card.append(recipeFields);
+  const foods = document.type === "food-import" ? [document.food] : document.foods;
+  const foodList = createElement("div", { className: "import-preview__foods" });
+  foods.forEach((food) => foodList.append(createImportFoodPreview(food)));
+  card.append(createElement("h4", { text: document.type === "food-import" ? "Food definition" : "Food definitions" }), foodList);
+
+  if (document.type === "recipe-import") {
+    const ingredientList = createElement("ul", { className: "import-preview__ingredients" });
+    document.recipe.ingredients.forEach((ingredient) => ingredientList.append(createElement("li", {
+      text: `${ingredient.foodImportKey}: ${ingredient.quantity} ${ingredient.unit}`
+    })));
+    card.append(createElement("h4", { text: "Recipe ingredients" }), ingredientList);
   }
 
-  const heading = createElement("h4", { text: isMeal ? "Interpreted items" : "Interpreted ingredients" });
-  const rows = createElement("div", { className: "ai-review-list" });
-  const rowElements = [];
+  const afcdCount = foods.filter((food) => food.source.kind === "afcd").length;
+  card.append(createElement("p", {
+    className: "import-foundation-notice",
+    text: afcdCount
+      ? `${afcdCount} AFCD ${afcdCount === 1 ? "reference requires" : "references require"} catalogue resolution. M15 provides validation and review only; confirmation will be enabled by later milestones.`
+      : "M15 provides validation and review only. Confirmation and database creation will be enabled by the food and recipe import milestones."
+  }));
 
-  workflow.resolutions.forEach((resolution, index) => {
-    const row = createElement("article", { className: "ai-review-row" });
-    const interpreted = createElement("p", {
-      className: "ai-review-row__interpreted",
-      text: `${resolution.source.description} · ${resolution.source.quantity} ${resolution.source.unit}${resolution.source.notes ? ` · ${resolution.source.notes}` : ""}`
-    });
-    const controls = createElement("div", { className: "ai-review-row__controls" });
-    const foodField = createElement("div", { className: "form-field" });
-    const foodLabel = createElement("label", { text: "Saved food", attributes: { for: `ai-${kind}-food-${index}` } });
-    const foodSelect = createElement("select", { attributes: { id: `ai-${kind}-food-${index}` } });
-    foodSelect.append(createElement("option", { text: "Choose a saved food", attributes: { value: "" } }));
-    foods.forEach((food) => foodSelect.append(createElement("option", {
-      text: food.brand ? `${food.name} · ${food.brand}` : food.name,
-      attributes: { value: food.id }
-    })));
-    foodSelect.value = resolution.foodId;
-    foodSelect.disabled = !workflow.editing;
-    foodField.append(foodLabel, foodSelect);
-
-    const quantityField = createElement("div", { className: "form-field" });
-    const quantityLabel = createElement("label", { text: "Quantity", attributes: { for: `ai-${kind}-quantity-${index}` } });
-    const quantityInput = createElement("input", {
-      attributes: { id: `ai-${kind}-quantity-${index}`, type: "number", min: "0.01", step: "0.01", value: resolution.quantity }
-    });
-    quantityInput.disabled = !workflow.editing;
-    quantityField.append(quantityLabel, quantityInput);
-
-    const portionField = createElement("div", { className: "form-field" });
-    const portionLabel = createElement("label", { text: "Serving or unit", attributes: { for: `ai-${kind}-portion-${index}` } });
-    const portionSelect = createElement("select", { attributes: { id: `ai-${kind}-portion-${index}` } });
-    portionSelect.disabled = !workflow.editing;
-    portionField.append(portionLabel, portionSelect);
-    controls.append(foodField, quantityField, portionField);
-
-    const status = createElement("p", { className: "ai-review-row__status" });
-    const points = createElement("strong", { className: "ai-review-row__points" });
-    let addFoodWithAi;
-    if (!resolution.foodId && typeof options.onAddMissingFood === "function") {
-      addFoodWithAi = createElement("button", {
-        className: "button button--small button--secondary",
-        text: "Add food with AI",
-        attributes: { type: "button" }
-      });
-      addFoodWithAi.addEventListener("click", () => options.onAddMissingFood(index, resolution));
-    }
-
-    function populatePortions() {
-      const food = foods.find((candidate) => candidate.id === foodSelect.value);
-      portionSelect.replaceChildren(createElement("option", { text: "Choose serving or unit", attributes: { value: "" } }));
-      if (food) {
-        portionSelect.append(
-          createElement("option", { text: "grams", attributes: { value: "__grams__" } }),
-          createElement("option", { text: "millilitres (1 ml = 1 g)", attributes: { value: "__millilitres__" } })
-        );
-        food.servings.forEach((serving) => portionSelect.append(createElement("option", {
-          text: `${serving.description} (${serving.grams} g)`,
-          attributes: { value: serving.id }
-        })));
-      }
-      portionSelect.value = [...portionSelect.options].some((option) => option.value === resolution.portionId)
-        ? resolution.portionId
-        : "";
-    }
-
-    foodSelect.addEventListener("change", () => {
-      resolution.foodId = foodSelect.value;
-      resolution.matchStatus = foodSelect.value ? "manual" : "unresolved";
-      const food = foods.find((candidate) => candidate.id === foodSelect.value);
-      if (food) Object.assign(resolution, suggestAiPortion(resolution.source, food));
-      else resolution.portionId = "";
-      quantityInput.value = resolution.quantity;
-      populatePortions();
-      refresh();
-    });
-    quantityInput.addEventListener("input", () => {
-      resolution.quantity = Number(quantityInput.value);
-      refresh();
-    });
-    portionSelect.addEventListener("change", () => {
-      resolution.portionId = portionSelect.value;
-      refresh();
-    });
-    populatePortions();
-    row.append(interpreted, controls, status, points);
-    if (addFoodWithAi) row.append(addFoodWithAi);
-    rows.append(row);
-    rowElements.push({ resolution, row, status, points });
-  });
-
-  const summary = createElement("p", { className: "ai-review-summary", attributes: { role: "status", "aria-live": "polite" } });
-  const message = createFormMessage();
   const actions = createElement("div", { className: "form-actions" });
-  const edit = createElement("button", { className: "button button--secondary", text: "Edit", attributes: { type: "button", disabled: workflow.editing ? "" : undefined } });
-  const confirm = createElement("button", { className: "button button--primary", text: "Confirm", attributes: { type: "button" } });
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  const edit = createElement("button", { className: "button button--secondary", text: "Edit", attributes: { type: "button" } });
   edit.addEventListener("click", () => {
-    workflow.editing = true;
+    workflow.stage = "paste";
     void renderCurrentRoute();
   });
-  cancel.addEventListener("click", onCancel);
-  confirm.addEventListener("click", async () => {
-    confirm.disabled = true;
-    showFormMessage(message, isMeal ? "Saving confirmed meal…" : "Saving confirmed recipe…", "progress");
-    try {
-      await onConfirm(workflow.resolutions.map((resolution) => calculateAiResolution(resolution, foods)));
-    } catch (error) {
-      console.error(`Could not save confirmed ${kind}`, error);
-      showFormMessage(message, error.message);
-      confirm.disabled = false;
-    }
+  const confirm = createElement("button", {
+    className: "button button--primary",
+    text: "Confirm",
+    attributes: { type: "button", disabled: "", title: "Saving is introduced in M17 and M18." }
   });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", cancelJsonImport);
   actions.append(edit, confirm, cancel);
-
-  function refresh() {
-    let total = 0;
-    let unresolved = 0;
-    rowElements.forEach(({ resolution, row, status, points }) => {
-      const calculated = calculateAiResolution(resolution, foods);
-      row.classList.toggle("ai-review-row--unresolved", !calculated.resolved);
-      status.textContent = aiMatchText(resolution, calculated);
-      points.textContent = calculated.resolved ? `${displayPoints(calculated.rawPoints)} PP` : "— PP";
-      if (calculated.resolved) total += calculated.rawPoints;
-      else unresolved += 1;
-    });
-    const validRecipe = isMeal || (typeof workflow.recipeName === "string" && workflow.recipeName.trim() && Number.isFinite(workflow.recipeServings) && workflow.recipeServings > 0);
-    confirm.disabled = unresolved > 0 || !validRecipe;
-    summary.textContent = unresolved
-      ? `${unresolved} unresolved ${unresolved === 1 ? "entry" : "entries"}. Resolve all entries before confirming. Current resolved total: ${displayPoints(total)} PP.`
-      : `${isMeal ? "Meal" : "Recipe"} total: ${displayPoints(total)} PP${isMeal ? "" : ` · ${displayPoints(total / workflow.recipeServings)} PP per serving`}.`;
-  }
-
-  card.append(heading, rows, summary);
-  card.append(message, actions);
-  refresh();
+  card.append(actions);
   return card;
 }
 
@@ -1137,328 +829,28 @@ function foodInputFromForm(form) {
   };
 }
 
-function aiFoodReturnRoute(workflow = aiFoodWorkflow) {
-  if (workflow?.origin === "recipe") return "recipes";
-  if (workflow?.origin === "meal") return "today";
-  return "foods";
-}
-
-function leaveAiFoodWorkflow() {
-  const route = aiFoodReturnRoute();
-  aiFoodWorkflow = undefined;
-  if (window.location.hash !== `#${route}`) window.location.hash = route;
-  else void renderCurrentRoute();
-}
-
-function finishAiFoodWorkflow(food, options = {}) {
-  const workflow = aiFoodWorkflow;
-  const parent = workflow?.origin === "recipe" ? aiRecipeWorkflow : workflow?.origin === "meal" ? aiMealWorkflow : undefined;
-  const resolution = parent?.resolutions?.[workflow?.resolutionIndex];
-  if (resolution) {
-    resolution.foodId = food.id;
-    resolution.matchStatus = "manual";
-    Object.assign(resolution, suggestAiPortion(resolution.source, food));
-    if (options.created !== false) parent.hasSavedFoods = true;
-  }
-  const route = aiFoodReturnRoute(workflow);
-  aiFoodWorkflow = undefined;
-  const action = options.created === false ? "selected" : "added";
-  if (workflow?.origin === "recipe") recipeNotice = `${food.name} ${action} and matched to the recipe.`;
-  else if (workflow?.origin === "meal") diaryNotice = `${food.name} ${action} and matched to the meal.`;
-  else foodNotice = workflow?.mode === "label"
-    ? `${food.name} created from the reviewed nutrition label.`
-    : `${food.name} created with AI assistance.`;
-  if (window.location.hash !== `#${route}`) window.location.hash = route;
-  else void renderCurrentRoute();
-}
-
-function startAiFoodForResolution(kind, index, resolution) {
-  aiFoodWorkflow = {
-    stage: "input",
-    text: resolution.source.description,
-    mode: "estimate",
-    origin: kind,
-    resolutionIndex: index
-  };
-  showingFoodForm = false;
-  editingFoodId = undefined;
-  window.location.hash = "foods";
-}
-
-function createAiFoodInputCard(workflow) {
-  const card = createElement("section", { className: "card form-card ai-input-card" });
-  card.append(
-    createElement("h3", { text: workflow.origin ? "Add missing food with AI" : "Create food with AI" }),
-    createElement("p", {
-      text: workflow.origin
-        ? "AI will suggest typical nutrition for this missing food. Review and edit every value before saving."
-        : "Paste stated nutrition or deliberately request a generic estimate. Points will be calculated locally after review."
-    })
-  );
-  const form = createElement("form", { className: "data-form" });
-  const modeField = createField({
-    label: "AI assistance",
-    name: "aiFoodMode",
-    value: workflow.mode,
-    options: [
-      { value: "extract", label: "Extract supplied nutrition" },
-      { value: "estimate", label: "Estimate generic nutrition" }
-    ],
-    attributes: { disabled: workflow.origin ? "" : undefined }
-  });
-  const modeSelect = modeField.querySelector("select");
-  const textField = createElement("div", { className: "form-field" });
-  const label = createElement("label", {
-    text: workflow.mode === "estimate" ? "Food name or description" : "Food and nutrition text",
-    attributes: { for: "ai-food-text" }
-  });
-  const textarea = createElement("textarea", {
-    attributes: {
-      id: "ai-food-text",
-      name: "aiFoodText",
-      rows: "6",
-      maxlength: "20000",
-      required: "",
-      placeholder: workflow.mode === "estimate"
-        ? "e.g. raw brown onion"
-        : "Example Brand Greek yoghurt. Per 100 g: protein 9.5 g, carbohydrate 6.2 g, fat 2.8 g, fibre 0 g. One tub is 170 g."
-    }
-  });
-  textarea.value = workflow.text;
-  textarea.addEventListener("input", () => { workflow.text = textarea.value; });
-  modeSelect.addEventListener("change", () => {
-    workflow.mode = modeSelect.value;
-    void renderCurrentRoute();
-  });
-  textField.append(label, textarea);
-  const estimateNotice = createElement("p", {
-    className: "ai-estimate-notice",
-    text: "AI estimates are suggestions, not verified label data. You must review them before saving."
-  });
-  estimateNotice.hidden = workflow.mode !== "estimate";
-  const message = createFormMessage();
-  const actions = createElement("div", { className: "form-actions" });
-  const submit = createElement("button", { className: "button button--primary", text: workflow.mode === "estimate" ? "Suggest nutrition" : "Extract nutrition", attributes: { type: "submit" } });
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
-  cancel.addEventListener("click", leaveAiFoodWorkflow);
-  actions.append(submit, cancel);
-  form.append(modeField, textField, estimateNotice, message, actions);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    workflow.text = textarea.value.trim();
-    workflow.mode = modeSelect.value;
-    submit.disabled = true;
-    showFormMessage(message, workflow.mode === "estimate" ? "Preparing an AI nutrition estimate…" : "Extracting nutrition with AI…", "progress");
-    try {
-      workflow.interpretation = await aiClient.interpretFood(workflow.text, workflow.mode);
-      workflow.draft = foodDraftFromInterpretation(workflow.interpretation);
-      workflow.duplicateApproved = false;
-      workflow.stage = "review";
-      await renderCurrentRoute();
-    } catch (error) {
-      console.error("Could not interpret food", error);
-      showFormMessage(message, error.message);
-      submit.disabled = false;
-    }
-  });
-  card.append(form);
-  queueMicrotask(() => textarea.focus());
-  return card;
-}
-
-function createLabelScanCard(workflow) {
-  const card = createElement("section", { className: "card form-card label-scan-card" });
-  card.append(
-    createElement("h3", { text: "Scan a nutrition label" }),
-    createElement("p", { text: "Take a clear, upright photo or choose an existing image. Extracted values will be shown in the ordinary food form for review." })
-  );
-  const message = createFormMessage();
-  if (workflow.errorMessage) showFormMessage(message, workflow.errorMessage);
-  else if (workflow.labelState === "uploading") showFormMessage(message, "Uploading and reading nutrition label…", "progress");
-
-  const inputs = createElement("div", { className: "form-actions label-scan-actions" });
-  const makeFileAction = ({ text, capture, ariaLabel }) => {
-    const label = createElement("label", { className: "button button--secondary label-image-button", text });
-    const input = createElement("input", {
-      className: "visually-hidden",
-      attributes: {
-        type: "file",
-        accept: "image/jpeg,image/png,image/webp",
-        capture,
-        "aria-label": ariaLabel,
-        disabled: workflow.labelState === "uploading" ? "" : undefined
-      }
-    });
-    input.addEventListener("change", async () => {
-      const image = input.files?.[0];
-      if (!image) return;
-      workflow.imageName = image.name || "Captured nutrition label";
-      workflow.errorMessage = "";
-      workflow.labelState = "uploading";
-      await renderCurrentRoute();
-      try {
-        workflow.interpretation = await aiClient.scanLabel(image);
-        workflow.draft = foodDraftFromLabel(workflow.interpretation);
-        workflow.duplicateApproved = false;
-        workflow.stage = "review";
-        await renderCurrentRoute();
-      } catch (error) {
-        console.error("Could not scan nutrition label", error);
-        workflow.labelState = "error";
-        workflow.errorMessage = error.message;
-        await renderCurrentRoute();
-      }
-    });
-    label.append(input);
-    return label;
-  };
-  inputs.append(
-    makeFileAction({ text: "Take photo", capture: "environment", ariaLabel: "Take a nutrition label photo" }),
-    makeFileAction({ text: "Choose image", ariaLabel: "Choose a nutrition label image" })
-  );
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
-  cancel.addEventListener("click", leaveAiFoodWorkflow);
-  inputs.append(cancel);
-  card.append(message, inputs);
-  return card;
-}
-
-function missingLabelValues(interpretation) {
-  if (!interpretation) return [];
-  const missing = [];
-  if (interpretation.name === null) missing.push("food name");
-  if (interpretation.brand === null) missing.push("brand");
-  if (interpretation.serving === null) missing.push("serving description and weight");
-  else if (interpretation.serving.grams === null) missing.push("serving weight");
-  for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
-    if (interpretation.nutritionPer100g[nutrient] === null) missing.push(`${nutrient} per 100 g`);
-  }
-  return missing;
-}
-
-function createFoodForm(food, options = {}) {
-  const initialFood = food ?? options.initialFood;
-  const aiWorkflow = options.aiWorkflow;
+function createFoodForm(food) {
   const card = createElement("section", { className: "card form-card food-form-card" });
-  card.append(createElement("h3", {
-    text: food
-      ? `Edit ${food.name}`
-      : aiWorkflow?.mode === "label" ? "Review scanned nutrition label" : aiWorkflow ? "Review AI-assisted food" : "Add food"
-  }));
-  if (aiWorkflow) {
-    const isLabelScan = aiWorkflow.mode === "label";
-    card.append(
-      createElement("p", {
-        className: aiWorkflow.mode === "estimate" ? "ai-estimate-notice" : "notice",
-        text: aiWorkflow.mode === "estimate"
-          ? "AI estimate — review and edit every nutritional value before creating this food."
-          : isLabelScan
-            ? "AI extracted these factual values from the label. Check every value against the image before creating this food."
-            : "AI extracted these values from your text. Check them against the source before creating this food."
-      })
-    );
-    if (isLabelScan) {
-      card.append(createElement("p", { className: "ai-original-text", text: `Image: ${aiWorkflow.imageName || "nutrition label"}` }));
-      const missing = missingLabelValues(aiWorkflow.interpretation);
-      if (missing.length) {
-        card.append(createElement("p", {
-          className: "label-missing-notice",
-          text: `Not found on the label: ${missing.join(", ")}. Complete required blank values before saving; the optional brand may remain blank.`
-        }));
-      }
-    } else {
-      card.append(
-        createElement("p", { className: "ai-original-label", text: "Original text" }),
-        createElement("blockquote", { className: "ai-original-text", text: aiWorkflow.text })
-      );
-    }
-    if (initialFood?.nutritionBasis === "per-serving") {
-      const originalNutrition = aiWorkflow.interpretation.nutrition;
-      const originalValues = ["protein", "carbohydrate", "fat", "fibre"]
-        .map((nutrient) => originalNutrition[nutrient] === null
-          ? `${nutrient} unknown`
-          : `${nutrient} ${originalNutrition[nutrient]} g`)
-        .join(", ");
-      card.append(
-        createElement("p", { className: "notice", text: `Original per-serving values: ${originalValues}.` }),
-        createElement("p", {
-          className: "notice",
-          text: initialFood.nutritionServingGrams
-            ? `The supplied per-serving nutrition was converted locally using ${initialFood.nutritionServingGrams} g per serving.`
-            : "Per-serving nutrition could not be converted because its serving weight is missing. Complete the per-100-g values below."
-        })
-      );
-    }
-  }
+  card.append(createElement("h3", { text: food ? `Edit ${food.name}` : "Add food" }));
   const form = createElement("form", { className: "data-form" });
   const fields = createElement("div", { className: "form-grid" });
   fields.append(
-    createField({ label: "Name", name: "name", value: initialFood?.name, attributes: { autocomplete: "off" } }),
-    createField({ label: "Brand (optional)", name: "brand", value: initialFood?.brand, required: false, attributes: { autocomplete: "off" } }),
-    createField({ label: "Protein /100 g", name: "protein", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.protein ?? "" }),
-    createField({ label: "Carbohydrate /100 g", name: "carbohydrate", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.carbohydrate ?? "" }),
-    createField({ label: "Fat /100 g", name: "fat", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.fat ?? "" }),
-    createField({ label: "Fibre /100 g", name: "fibre", type: "number", min: "0", step: "0.1", value: initialFood?.nutritionPer100g?.fibre ?? "" })
+    createField({ label: "Name", name: "name", value: food?.name, attributes: { autocomplete: "off" } }),
+    createField({ label: "Brand (optional)", name: "brand", value: food?.brand, required: false, attributes: { autocomplete: "off" } }),
+    createField({ label: "Protein /100 g", name: "protein", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.protein ?? "" }),
+    createField({ label: "Carbohydrate /100 g", name: "carbohydrate", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.carbohydrate ?? "" }),
+    createField({ label: "Fat /100 g", name: "fat", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.fat ?? "" }),
+    createField({ label: "Fibre /100 g", name: "fibre", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.fibre ?? "" })
   );
-  if (aiWorkflow?.mode === "label") {
-    const fieldToValue = {
-      name: aiWorkflow.interpretation.name,
-      protein: aiWorkflow.interpretation.nutritionPer100g.protein,
-      carbohydrate: aiWorkflow.interpretation.nutritionPer100g.carbohydrate,
-      fat: aiWorkflow.interpretation.nutritionPer100g.fat,
-      fibre: aiWorkflow.interpretation.nutritionPer100g.fibre
-    };
-    Object.entries(fieldToValue).forEach(([name, value]) => {
-      if (value !== null) return;
-      const input = fields.querySelector(`[name="${name}"]`);
-      const field = input?.closest(".form-field");
-      field?.classList.add("form-field--missing");
-      input?.setAttribute("aria-invalid", "true");
-      input?.addEventListener("input", () => {
-        if (!input.value.trim()) return;
-        field?.classList.remove("form-field--missing");
-        input.removeAttribute("aria-invalid");
-      });
-    });
-  }
 
   const servingSection = createElement("fieldset", { className: "serving-editor" });
   servingSection.append(createElement("legend", { text: "Named servings" }));
   const servingRows = createElement("div", { className: "serving-rows" });
-  const initialServings = initialFood?.servings?.length ? initialFood.servings : [{}];
+  const initialServings = food?.servings?.length ? food.servings : [{}];
   initialServings.forEach((serving, index) => {
     servingRows.append(createServingRow(serving, food ? serving.id === food.defaultServingId : index === 0));
   });
-  if (aiWorkflow?.mode === "label") {
-    const firstRow = servingRows.querySelector(".serving-row");
-    const labelServing = aiWorkflow.interpretation.serving;
-    if (labelServing === null) {
-      firstRow?.classList.add("serving-row--missing");
-      const missingInputs = firstRow ? [...firstRow.querySelectorAll("input[type='text'], input[type='number']")] : [];
-      missingInputs.forEach((input) => {
-        input.setAttribute("aria-invalid", "true");
-        input.addEventListener("input", () => {
-          if (missingInputs.some((candidate) => !candidate.value.trim())) return;
-          firstRow.classList.remove("serving-row--missing");
-          missingInputs.forEach((candidate) => candidate.removeAttribute("aria-invalid"));
-        });
-      });
-    } else if (labelServing.grams === null) {
-      firstRow?.classList.add("serving-row--missing");
-      const gramsInput = firstRow?.querySelector("[data-serving-grams]");
-      gramsInput?.setAttribute("aria-invalid", "true");
-      gramsInput?.addEventListener("input", () => {
-        if (!gramsInput.value.trim()) return;
-        firstRow.classList.remove("serving-row--missing");
-        gramsInput.removeAttribute("aria-invalid");
-      });
-    }
-  }
-  const addServing = createElement("button", {
-    className: "button button--secondary",
-    text: "Add serving",
-    attributes: { type: "button" }
-  });
+  const addServing = createElement("button", { className: "button button--secondary", text: "Add serving", attributes: { type: "button" } });
   addServing.addEventListener("click", () => servingRows.append(createServingRow()));
   servingSection.append(servingRows, addServing);
 
@@ -1475,9 +867,7 @@ function createFoodForm(food, options = {}) {
       const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing };
       calculation.textContent = `${displayPoints(foodPointsPer100g(preview))} PP per 100 g · ${displayPoints(foodPointsForDefaultServing(preview))} PP per ${defaultServing.description || "default serving"}`;
     } catch {
-      calculation.textContent = aiWorkflow?.mode === "label"
-        ? "Points cannot be calculated until all four per-100-g nutrition values and a default serving are completed."
-        : "Enter nutrition and a default serving to calculate Points.";
+      calculation.textContent = "Enter nutrition and a default serving to calculate Points.";
     }
   }
   form.addEventListener("input", updateCalculation);
@@ -1485,53 +875,14 @@ function createFoodForm(food, options = {}) {
 
   const message = createFormMessage();
   const actions = createElement("div", { className: "form-actions" });
-  const submit = createElement("button", {
-    className: "button button--primary",
-    text: food ? "Save changes" : aiWorkflow ? "Confirm and create food" : "Create food",
-    attributes: { type: "submit", disabled: options.duplicateFood && !aiWorkflow.duplicateApproved ? "" : undefined }
-  });
-  const cancel = createElement("button", {
-    className: "button button--secondary",
-    text: "Cancel",
-    attributes: { type: "button" }
-  });
-  cancel.addEventListener("click", options.onCancel ?? (() => {
+  const submit = createElement("button", { className: "button button--primary", text: food ? "Save changes" : "Create food", attributes: { type: "submit" } });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", () => {
     showingFoodForm = false;
     editingFoodId = undefined;
     void renderCurrentRoute();
-  }));
+  });
   actions.append(submit, cancel);
-
-  if (options.duplicateFood && !aiWorkflow.duplicateApproved) {
-    const duplicate = createElement("section", { className: "ai-duplicate-warning" });
-    duplicate.append(createElement("p", {
-      text: `Possible existing food: ${options.duplicateFood.name}${options.duplicateFood.brand ? ` · ${options.duplicateFood.brand}` : ""}. Choose explicitly before continuing.`
-    }));
-    const duplicateActions = createElement("div", { className: "form-actions" });
-    const useExisting = createElement("button", {
-      className: "button button--secondary",
-      text: aiWorkflow.origin ? "Use existing food" : "Edit existing food",
-      attributes: { type: "button" }
-    });
-    useExisting.addEventListener("click", () => {
-      if (aiWorkflow.origin) finishAiFoodWorkflow(options.duplicateFood, { created: false });
-      else {
-        aiFoodWorkflow = undefined;
-        foodSearchQuery = "";
-        showingFoodForm = true;
-        editingFoodId = options.duplicateFood.id;
-        void renderCurrentRoute();
-      }
-    });
-    const createAnyway = createElement("button", { className: "button button--secondary", text: "Create new anyway", attributes: { type: "button" } });
-    createAnyway.addEventListener("click", () => {
-      aiWorkflow.duplicateApproved = true;
-      void renderCurrentRoute();
-    });
-    duplicateActions.append(useExisting, createAnyway);
-    duplicate.append(duplicateActions);
-    form.append(duplicate);
-  }
 
   form.append(fields, servingSection, calculation, message, actions);
   form.addEventListener("submit", async (event) => {
@@ -1540,15 +891,11 @@ function createFoodForm(food, options = {}) {
     showFormMessage(message, "Saving food…", "progress");
     try {
       const input = foodInputFromForm(form);
-      if (aiWorkflow) input.source = aiWorkflow.mode === "label" ? "nutrition-label" : aiWorkflow.interpretation.provenance;
       const saved = food ? await updateFood(food.id, input) : await createFood(input);
       showingFoodForm = false;
       editingFoodId = undefined;
-      if (typeof options.onSaved === "function") await options.onSaved(saved);
-      else {
-        foodNotice = `${saved.name} ${food ? "updated" : "created"}.`;
-        await renderCurrentRoute();
-      }
+      foodNotice = `${saved.name} ${food ? "updated" : "created"}.`;
+      await renderCurrentRoute();
     } catch (error) {
       console.error("Could not save food", error);
       showFormMessage(message, error.message);
@@ -1591,8 +938,9 @@ function createFoodCard(food) {
   const identity = createElement("div");
   identity.append(createElement("h3", { text: food.name }));
   if (food.brand) identity.append(createElement("p", { className: "food-brand", text: food.brand }));
-  if (food.source === "ai-estimate") identity.append(createElement("span", { className: "food-source-badge", text: "AI estimate" }));
-  else if (food.source === "ai-text") identity.append(createElement("span", { className: "food-source-badge food-source-badge--extracted", text: "AI extracted" }));
+  if (["ai-estimate", "ai-text", "nutrition-label"].includes(food.source)) {
+    identity.append(createElement("span", { className: "food-source-badge", text: "Imported nutrition" }));
+  }
   heading.append(identity, createElement("strong", { className: "food-points", text: `${displayPoints(foodPointsPer100g(food))} PP /100 g` }));
 
   const servingList = createElement("ul", { className: "serving-list" });
@@ -1648,35 +996,26 @@ function createFoodCard(food) {
   return card;
 }
 
-function renderFoodsScreen(foods, aliases) {
+function renderFoodsScreen(foods) {
   const screen = createElement("section", { className: "screen" });
   const header = createScreenHeader("Foods", "Shared household foods, nutrition and named serving sizes.");
   const headerActions = createElement("div", { className: "screen-header__actions" });
   const addFood = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button" } });
   addFood.addEventListener("click", () => {
-    aiFoodWorkflow = undefined;
+    jsonImportWorkflow = undefined;
     showingFoodForm = true;
     editingFoodId = undefined;
     pendingDeleteFoodId = undefined;
     void renderCurrentRoute();
   });
-  const addFoodWithAi = createElement("button", { className: "button button--secondary", text: "Add food with AI", attributes: { type: "button" } });
-  addFoodWithAi.addEventListener("click", () => {
+  const pasteJson = createElement("button", { className: "button button--secondary", text: "Paste food JSON", attributes: { type: "button" } });
+  pasteJson.addEventListener("click", () => {
     showingFoodForm = false;
     editingFoodId = undefined;
     pendingDeleteFoodId = undefined;
-    aiFoodWorkflow = { stage: "input", text: "", mode: "extract" };
-    void renderCurrentRoute();
+    startJsonImport("food-import");
   });
-  const scanLabel = createElement("button", { className: "button button--secondary", text: "Scan nutrition label", attributes: { type: "button" } });
-  scanLabel.addEventListener("click", () => {
-    showingFoodForm = false;
-    editingFoodId = undefined;
-    pendingDeleteFoodId = undefined;
-    aiFoodWorkflow = { stage: "label", labelState: "idle", mode: "label" };
-    void renderCurrentRoute();
-  });
-  headerActions.append(addFood, addFoodWithAi, scanLabel);
+  headerActions.append(addFood, pasteJson);
   header.append(headerActions);
   screen.append(header);
 
@@ -1691,24 +1030,8 @@ function renderFoodsScreen(foods, aliases) {
     return screen;
   }
 
-  if (aiFoodWorkflow) {
-    if (aiFoodWorkflow.stage === "input") {
-      screen.append(createAiFoodInputCard(aiFoodWorkflow));
-    } else if (aiFoodWorkflow.stage === "label") {
-      screen.append(createLabelScanCard(aiFoodWorkflow));
-    } else {
-      const match = aiFoodWorkflow.draft.name
-        ? matchFood(aiFoodWorkflow.draft.name, foods, aliases)
-        : { status: "unresolved", foodId: "" };
-      const duplicateFood = match.foodId ? foods.find((food) => food.id === match.foodId) : undefined;
-      screen.append(createFoodForm(undefined, {
-        initialFood: aiFoodWorkflow.draft,
-        aiWorkflow: aiFoodWorkflow,
-        duplicateFood,
-        onCancel: leaveAiFoodWorkflow,
-        onSaved: finishAiFoodWorkflow
-      }));
-    }
+  if (jsonImportWorkflow?.expectedType === "food-import") {
+    screen.append(createJsonImportCard(jsonImportWorkflow));
     return screen;
   }
 
@@ -2005,48 +1328,29 @@ function createRecipeSearch() {
   return form;
 }
 
-function renderRecipesScreen(recipes, foods, aliases) {
+function renderRecipesScreen(recipes, foods) {
   const screen = createElement("section", { className: "screen" });
   const header = createScreenHeader("Recipes", "Build reusable recipes from foods in the shared household database.");
   const headerActions = createElement("div", { className: "screen-header__actions" });
   const addRecipe = createElement("button", { className: "button button--primary", text: "Create recipe", attributes: { type: "button", disabled: foods.length ? undefined : "" } });
   addRecipe.addEventListener("click", () => {
-    aiRecipeWorkflow = undefined;
+    jsonImportWorkflow = undefined;
     showingRecipeForm = true;
     editingRecipeId = undefined;
     pendingDeleteRecipeId = undefined;
     void renderCurrentRoute();
   });
-  const addWithAi = createElement("button", {
+  const pasteJson = createElement("button", {
     className: "button button--secondary",
-    text: "Create with AI",
-    attributes: {
-      type: "button",
-      title: "Interpret recipe text, match saved foods, and add missing foods with AI assistance."
-    }
+    text: "Paste recipe JSON",
+    attributes: { type: "button" }
   });
-  addWithAi.addEventListener("click", () => {
+  pasteJson.addEventListener("click", () => {
     showingRecipeForm = false;
     editingRecipeId = undefined;
-    aiRecipeWorkflow = { stage: "input", text: "" };
-    void renderCurrentRoute();
+    startJsonImport("recipe-import");
   });
-  const recordRecipe = createElement("button", {
-    className: "button button--secondary",
-    text: "Record recipe",
-    attributes: {
-      type: "button",
-      disabled: voiceRecordingSupported() ? undefined : "",
-      title: voiceRecordingSupported() ? "Record a recipe, then review it before saving." : "Voice recording is not supported by this browser."
-    }
-  });
-  recordRecipe.addEventListener("click", () => {
-    showingRecipeForm = false;
-    editingRecipeId = undefined;
-    aiRecipeWorkflow = { stage: "voice", voiceState: "idle", text: "", transcript: "" };
-    void renderCurrentRoute();
-  });
-  headerActions.append(addRecipe, addWithAi, recordRecipe);
+  headerActions.append(addRecipe, pasteJson);
   header.append(headerActions);
   screen.append(header);
   if (recipeNotice) {
@@ -2058,30 +1362,8 @@ function renderRecipesScreen(recipes, foods, aliases) {
     screen.append(createRecipeForm(foods, recipe));
     return screen;
   }
-  if (aiRecipeWorkflow) {
-    const cancel = () => {
-      aiRecipeWorkflow?.recorder?.cancel();
-      aiRecipeWorkflow = undefined;
-      void renderCurrentRoute();
-    };
-    if (aiRecipeWorkflow.stage === "review") {
-      screen.append(createAiReviewCard("recipe", aiRecipeWorkflow, foods, cancel, async (calculated) => {
-        const saved = await createRecipe({
-          name: aiRecipeWorkflow.recipeName,
-          servings: aiRecipeWorkflow.recipeServings,
-          ingredients: calculated.map((item) => item.recipeIngredient)
-        });
-        aiRecipeWorkflow = undefined;
-        recipeNotice = `${saved.name} created after review.`;
-        await renderCurrentRoute();
-      }, {
-        onAddMissingFood: (index, resolution) => startAiFoodForResolution("recipe", index, resolution)
-      }));
-    } else if (aiRecipeWorkflow.stage === "voice") {
-      screen.append(createAiVoiceInputCard("recipe", aiRecipeWorkflow, foods, aliases, cancel));
-    } else {
-      screen.append(createAiTextInputCard("recipe", aiRecipeWorkflow, foods, aliases, cancel));
-    }
+  if (jsonImportWorkflow?.expectedType === "recipe-import") {
+    screen.append(createJsonImportCard(jsonImportWorkflow));
     return screen;
   }
   screen.append(createRecipeSearch());
@@ -2827,14 +2109,12 @@ async function renderScreen(route) {
     screen = renderSetupScreen(state);
   } else if (route.name === "today") {
     const today = localDateString();
-    const [summary, weekly, foods, aliases] = await Promise.all([
+    const [summary, weekly] = await Promise.all([
       getDiarySummary(state.currentUser.id, today),
-      getWeeklySummary(state.currentUser.id, today, { asOfDate: today }),
-      searchFoods(""),
-      listFoodAliases()
+      getWeeklySummary(state.currentUser.id, today, { asOfDate: today })
     ]);
     if (sequence !== renderSequence) return;
-    screen = renderTodayScreen(state, summary, weekly, foods, aliases);
+    screen = renderTodayScreen(state, summary, weekly);
   } else if (route.name === "diary") {
     if (selectedDiaryDate < state.weighIns[0].date) selectedDiaryDate = state.weighIns[0].date;
     const [summary, foods, recipes] = await Promise.all([
@@ -2847,20 +2127,16 @@ async function renderScreen(route) {
   } else if (route.name === "settings") {
     screen = renderSettingsScreen(state);
   } else if (route.name === "foods") {
-    const [foods, aliases] = await Promise.all([
-      searchFoods(aiFoodWorkflow ? "" : foodSearchQuery),
-      listFoodAliases()
-    ]);
+    const foods = await searchFoods(jsonImportWorkflow?.expectedType === "food-import" ? "" : foodSearchQuery);
     if (sequence !== renderSequence) return;
-    screen = renderFoodsScreen(foods, aliases);
+    screen = renderFoodsScreen(foods);
   } else if (route.name === "recipes") {
-    const [recipes, foods, aliases] = await Promise.all([
+    const [recipes, foods] = await Promise.all([
       searchRecipes(recipeSearchQuery),
-      searchFoods(""),
-      listFoodAliases()
+      searchFoods("")
     ]);
     if (sequence !== renderSequence) return;
-    screen = renderRecipesScreen(recipes, foods, aliases);
+    screen = renderRecipesScreen(recipes, foods);
   } else if (route.name === "progress") {
     if (progressView === "overview") {
       const progress = await getProgressSummary(state.currentUser.id, localDateString());
@@ -2902,9 +2178,7 @@ async function startApplication() {
     editingDiaryEntryId = undefined;
     pendingRecipeDiaryId = undefined;
     pendingDeleteDiaryEntryId = undefined;
-    aiMealWorkflow = undefined;
-    aiRecipeWorkflow = undefined;
-    aiFoodWorkflow = undefined;
+    jsonImportWorkflow = undefined;
     await renderCurrentRoute();
   });
   addProfileButton.addEventListener("click", () => {

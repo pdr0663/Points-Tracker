@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "food-import-v1.schema.json",
+  "title": "Points Tracker food import version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "type", "food"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "type": { "const": "food-import" },
+    "food": { "$ref": "#/$defs/food" }
+  },
+  "$defs": {
+    "serving": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "grams"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "grams": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "nutrition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protein", "carbohydrate", "fat", "fibre"],
+      "properties": {
+        "protein": { "type": "number", "minimum": 0 },
+        "carbohydrate": { "type": "number", "minimum": 0 },
+        "fat": { "type": "number", "minimum": 0 },
+        "fibre": { "type": "number", "minimum": 0 }
+      }
+    },
+    "externalFood": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "brand", "source", "nutritionPer100g", "servings"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "brand": { "type": ["string", "null"], "maxLength": 160 },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "external-json" } }
+        },
+        "nutritionPer100g": { "$ref": "#/$defs/nutrition" },
+        "servings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
+      }
+    },
+    "afcdFood": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "brand", "source", "servings"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "brand": { "type": ["string", "null"], "maxLength": 160 },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "foodId"],
+          "properties": {
+            "kind": { "const": "afcd" },
+            "foodId": { "type": "string", "minLength": 1, "maxLength": 100 }
+          }
+        },
+        "servings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
+      }
+    },
+    "food": { "oneOf": [{ "$ref": "#/$defs/externalFood" }, { "$ref": "#/$defs/afcdFood" }] }
+  }
+}
+

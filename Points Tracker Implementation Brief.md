@@ -6,31 +6,31 @@ Implement the Points Tracker described in the functional specification as a smal
 
 The application must:
 
-* work locally without AI for all core tracking functions
+* work locally for all tracking and import functions
 * use IndexedDB for persistence
 * use vanilla HTML, CSS, and JavaScript
 * support two or more household users
 * support foods, recipes, diary entries, weigh-ins, goals, and progress
-* provide AI-assisted meal, recipe, food, voice, and nutrition-label input
-* use a server-side OpenAI integration
-* never expose the OpenAI API key to browser code
+* provide a bundled AFCD reference-food catalogue
+* support validated food and recipe input from pasted JSON
 * keep all Points calculations deterministic and local
-* require human confirmation before saving AI-interpreted information
+* require human confirmation before saving imported information
 
 The guiding architecture is:
 
 ```text
-Browser application
-        |
-        | optional AI requests
-        v
-Small backend/API
-        |
-        v
-OpenAI API
+Bundled AFCD catalogue ----+
+                           v
+Pasted JSON ----------> Browser validation and review
+                           |
+                           v
+                    IndexedDB records
+                           |
+                           v
+              Deterministic Points calculations
 ```
 
-The core browser application must remain usable if the backend or OpenAI API is unavailable.
+The production application remains a static GitHub Pages site. It has no integrated AI service, runtime backend, or secret credential.
 
 ---
 
@@ -55,13 +55,13 @@ M6  Weekly tracking
 M7  Recipes
 M8  Progress
 M9  Backup and restore
-M10 AI backend
-M11 AI meal and recipe entry
-M12 AI food entry
-M13 Voice input
-M14 Nutrition-label image input
-M15 PWA/offline polish
-M16 Final test and cleanup
+M10-M14 Completed historical AI implementation, now superseded
+M15 Remove integrated AI and establish JSON import foundation
+M16 AFCD reference catalogue and combined food search
+M17 Food JSON import
+M18 Recipe bundle JSON import
+M19 PWA/offline completion
+M20 Final QA and documentation
 ```
 
 Do not begin a later milestone until the previous milestone's acceptance tests pass.
@@ -78,8 +78,6 @@ points-tracker/
 ├── README.md
 ├── package.json
 ├── .gitignore
-├── .env.example
-│
 ├── public/
 │   ├── index.html
 │   ├── manifest.json
@@ -100,29 +98,29 @@ points-tracker/
 │   │   ├── recipes.js
 │   │   ├── progress.js
 │   │   ├── backup.js
-│   │   ├── ai.js
-│   │   ├── audio.js
+│   │   ├── reference-foods.js
+│   │   ├── json-import.js
 │   │   └── ui.js
+│   │
+│   ├── data/
+│   │   └── afcd-reference.json
+│   │
+│   ├── schemas/
+│   │   ├── food-import-v1.schema.json
+│   │   └── recipe-import-v1.schema.json
 │   │
 │   └── icons/
 │
-├── server/
-│   ├── index.js
-│   ├── openai.js
-│   ├── validation.js
-│   ├── schemas.js
-│   └── routes/
-│       ├── meal.js
-│       ├── recipe.js
-│       ├── transcribe.js
-│       └── label.js
+├── tools/
+│   └── build-afcd-catalogue.js
 │
 └── tests/
     ├── points.test.js
     ├── allowance.test.js
     ├── recipes.test.js
     ├── backup.test.js
-    └── ai-schema.test.js
+    ├── reference-foods.test.js
+    └── json-import.test.js
 ```
 
 Do not introduce a frontend framework unless implementation complexity clearly justifies it.
@@ -157,7 +155,7 @@ Avoid:
 * direct IndexedDB access from UI components
 * hidden global state
 * business logic inside HTML
-* AI-generated Points calculations
+* imported Points calculations
 
 Business logic and presentation logic must remain separate.
 
@@ -234,11 +232,18 @@ This reflects the historical allowance formula being implemented rather than a b
             grams
         }
     ],
-    source,
+    isZeroPoint,
+    source: {
+        kind,
+        referenceId,
+        referenceRelease
+    },
     createdAt,
     updatedAt
 }
 ```
+
+`source.kind` is initially `manual`, `afcd`, or `external-json`. Reference fields are required for `afcd` and otherwise `null`.
 
 Nutrition properties may be `null` if unknown.
 
@@ -343,7 +348,7 @@ Database name:
 points-tracker
 ```
 
-Initial schema version:
+Currently implemented schema version:
 
 ```text
 1
@@ -374,6 +379,7 @@ weighIns:
 
 foods:
     normalizedName
+    [source.kind, source.referenceId] (added by the AFCD migration)
 
 foodAliases:
     normalizedAlias
@@ -392,6 +398,8 @@ diaryEntries:
 Wrap IndexedDB operations in `db.js`.
 
 Other application modules must not call raw IndexedDB APIs directly.
+
+M16 must increment `DATABASE_VERSION` and add the food-source index through `upgradeneeded`. Existing records without structured source metadata remain valid and are not deleted.
 
 Provide functions resembling:
 
@@ -751,11 +759,9 @@ weekly extras remaining
 Provide prominent actions:
 
 ```text
-Tell me what I ate
 Add food
+Search foods
 ```
-
-AI action may initially be disabled.
 
 ## Daily Point Handling
 
@@ -1035,7 +1041,9 @@ Datasets must be equivalent.
 
 ---
 
-# 17. Milestone M10 — AI Backend
+# 17. Milestone M10 — AI Backend [COMPLETED, SUPERSEDED]
+
+> Historical record only: M10 through M14 describe the integrated AI implementation completed at commit `68ba5f3`. They are no longer active product requirements. M15 removes these features and their runtime server; do not extend or repair them.
 
 Create a minimal Node.js backend.
 
@@ -1095,7 +1103,7 @@ Provide sensible defaults in code.
 
 ---
 
-# 18. Milestone M11 — AI Meal and Recipe Input
+# 18. Milestone M11 — AI Meal and Recipe Input [COMPLETED, SUPERSEDED]
 
 ## Meal Schema
 
@@ -1219,7 +1227,7 @@ unresolved. The completed recipe references the saved food record.
 
 ---
 
-# 19. Milestone M12 — AI Food Input
+# 19. Milestone M12 — AI Food Input [COMPLETED, SUPERSEDED]
 
 Add an AI-assisted option to the ordinary food-creation screen.
 
@@ -1359,7 +1367,7 @@ ingredients all reference saved foods.
 
 ---
 
-# 20. Milestone M13 — Voice Input
+# 20. Milestone M13 — Voice Input [COMPLETED, SUPERSEDED]
 
 Use browser `MediaRecorder`.
 
@@ -1404,7 +1412,7 @@ A failed transcription must not lose the user's existing diary state.
 
 ---
 
-# 21. Milestone M14 — Nutrition Label Scanning
+# 21. Milestone M14 — Nutrition Label Scanning [COMPLETED, SUPERSEDED]
 
 Support:
 
@@ -1461,118 +1469,156 @@ There must not be a separate AI-food database.
 
 ---
 
-# 22. Milestone M15 — Offline/PWA Support
+# 22. Milestone M15 — Remove Integrated AI and Establish JSON Import Foundation
 
-Implement application manifest.
+Remove all integrated AI features from the production application:
 
-Implement service worker.
+* meal and recipe natural-language controls
+* AI-assisted food controls
+* microphone recording and transcription controls
+* nutrition-label image scanning controls
+* browser AI client modules
+* Node/OpenAI server code and schemas
+* `.env` and OpenAI setup instructions
+* AI-specific tests, styles, errors, and configuration
 
-Cache:
+Preserve ordinary food, recipe, diary, and backup behaviour. Existing IndexedDB data must remain compatible; food records with historical AI source strings may remain readable and may be normalised by a versioned migration if needed.
 
-* application shell
-* CSS
-* JavaScript
-* icons
+Add the shared JSON-import foundation:
 
-Do not cache AI API responses unless specifically justified.
+1. paste modal or screen used by both Foods and Recipes
+2. trimming and optional single Markdown `json` fence removal
+3. strict `JSON.parse` handling with a pasted-document size limit
+4. dispatch by `schemaVersion` and `type`
+5. reusable field-specific validation results
+6. preview, Edit, Confirm, and Cancel states
+7. checked-in schema and authoring-guide locations
 
-Offline mode must support:
+## Definition of Done
 
-```text
-Today
-Diary
-Foods
-Recipes
-Weigh-ins
-Progress
-Backup
-```
-
-AI controls should clearly show:
-
-```text
-Internet connection required
-```
-
-rather than failing mysteriously.
+The deployed application contains no AI, voice, image-scan, backend-status, or API-key controls. It still passes all unaffected tests. Valid sample import documents reach a non-writing preview; malformed or unsupported documents preserve the pasted input and change no data.
 
 ---
 
-# 23. Milestone M16 — Final QA
+# 23. Milestone M16 — AFCD Reference Catalogue
 
-Test on:
+1. Obtain the approved AFCD release under its FSANZ licence.
+2. Add a reproducible development tool that reads the official source files.
+3. Generate a compact static catalogue containing identifiers, names, search terms, classifications, required nutrients, release metadata, and attribution.
+4. Validate every generated record and produce deterministic output.
+5. Search saved foods and AFCD foods together, showing saved foods first and identifying sources clearly.
+6. Preview an AFCD item and import a nutritional snapshot through the ordinary food service.
+7. Reuse an already imported AFCD record by source identifier.
+8. Apply deterministic zero-point rules from curated classification mapping, with user review.
 
-```text
-Chrome desktop
-Safari desktop where available
-Chrome Android
-Safari iPhone/iPad
-```
+## Definition of Done
 
-At minimum emulate small mobile dimensions if physical devices are unavailable.
-
-Test widths:
-
-```text
-320 px
-375 px
-430 px
-768 px
-desktop
-```
+Food search works without a runtime API. Selecting an AFCD item shows official nutrition and locally calculated Points. Confirmation creates one ordinary food with AFCD release metadata; repeat selection does not create a duplicate.
 
 ---
 
-# 24. API Schemas
+# 24. Milestone M17 — Food JSON Import
 
-Use strict structured-output schemas.
+Implement the Version 1 `food-import` schema and UI.
 
-## Meal Item
+Support:
 
-```text
-description: string, required
-quantity: number, required
-unit: string, required
-notes: string|null
-```
+* complete `external-json` food definitions
+* AFCD references resolved from the bundled catalogue
+* bare JSON and one complete Markdown JSON fence
+* ordinary food-editor review
+* duplicate detection
+* serving validation
+* explicit zero-point review
+* deterministic Points preview
 
-Do not include:
+Reject Points fields, unknown properties, missing required nutrition, non-finite values, unsupported schema versions, and unknown AFCD identifiers.
 
-```text
-calories
-points
-weight-loss advice
-```
+## Definition of Done
 
-unless specifically requested by a later feature.
-
-## Food Interpretation
-
-```text
-type: "food"
-name: string|null
-brand: string|null
-servings: array of { description: string|null, grams: number|null }
-nutrition: {
-  basis: "per-100g"|"per-serving",
-  servingGrams: number|null,
-  protein, carbohydrate, fat, fibre
-}
-```
-
-Reject extra fields, including API-supplied calories or Points. Enforce bounded
-text, array, and numeric values server-side and revalidate the response in the
-browser.
-
-`POST /api/interpret-food` accepts `text` and `mode`. In `extract` mode, unknown
-facts remain null. In `estimate` mode, suggested nutrition must be complete
-enough for deterministic calculation. The backend adds `ai-text` or
-`ai-estimate` provenance after validating model output; provenance is not a
-model-authoritative field.
+Cancel writes nothing. Confirm creates or explicitly reuses one ordinary shared food. AFCD imports use bundled reference nutrition rather than pasted duplicates.
 
 ---
 
-# 25. Error Handling Contract
+# 25. Milestone M18 — Recipe Bundle JSON Import
+
+Implement the Version 1 `recipe-import` schema.
+
+The bundle contains local `importKey` food definitions and recipe ingredients that reference those keys. Resolve foods in this order:
+
+```text
+same AFCD source identifier
+exact saved food
+alias
+exact AFCD reference
+possible match requiring confirmation
+unresolved
+```
+
+Show existing foods to reuse, AFCD foods to import, custom foods to create, and all conflicts. Confirmation must create all missing foods and the recipe in one IndexedDB transaction, then replace import keys with persistent food IDs.
+
+## Definition of Done
+
+No unresolved ingredient can be confirmed. Cancellation and validation failures write nothing. A forced database failure leaves neither partial food inserts nor a partial recipe.
+
+---
+
+# 26. Milestone M19 — Offline/PWA Completion
+
+Implement or complete the manifest and service worker. Cache the application shell, CSS, JavaScript, schemas, icons, and AFCD catalogue.
+
+After first successful load, all Version 1 tracking, reference search, food import, recipe import, progress, and backup features must work offline.
+
+---
+
+# 27. Milestone M20 — Final QA and Documentation
+
+Test Chrome desktop, Safari desktop where available, Chrome Android, and Safari on iPhone/iPad where available. At minimum test widths of 320, 375, 430, and 768 pixels plus desktop.
+
+Run all automated tests and manually verify AFCD attribution, upgrade compatibility, bare and fenced JSON imports, invalid-input recovery, atomic recipe imports, backup/restore, GitHub Pages deployment, and offline operation.
+
+Update README setup, architecture, data-source, import-authoring, licence, and troubleshooting sections. No OpenAI account, environment file, Node server, or runtime API should be required.
+
+---
+
+# 28. Import Schemas
+
+Store Version 1 schemas in the repository and publish them with the static application.
+
+## Food import
+
+Require:
+
+```text
+schemaVersion: 1
+type: "food-import"
+food.name: bounded non-empty string
+food.brand: bounded string|null
+food.source: AFCD reference or external-json marker
+food.nutritionPer100g: complete non-negative protein, carbohydrate, fat, fibre for external-json
+food.servings: bounded array of description and positive grams
+```
+
+An AFCD reference requires a valid `foodId` and must not override catalogue nutrition.
+
+## Recipe import
+
+Require:
+
+```text
+schemaVersion: 1
+type: "recipe-import"
+foods: bounded array with unique importKey values
+recipe.name: bounded non-empty string
+recipe.servings: positive finite number
+recipe.ingredients: bounded array referencing declared foodImportKey values
+```
+
+Ingredient units are limited to those supported by the existing recipe service. Reject extra fields, application UUIDs, calories, Points, advice, executable strings, non-finite numbers, and unsafe object keys.
+
+---
+
+# 29. Error Handling Contract
 
 Client errors should be represented consistently.
 
@@ -1592,10 +1638,12 @@ Expected categories:
 DB_ERROR
 VALIDATION_ERROR
 NETWORK_ERROR
-AI_REQUEST_FAILED
-AI_INVALID_RESPONSE
-AUDIO_ERROR
-IMAGE_ERROR
+JSON_PARSE_ERROR
+IMPORT_SCHEMA_UNSUPPORTED
+IMPORT_INVALID
+IMPORT_DUPLICATE_KEY
+AFCD_NOT_FOUND
+IMPORT_AMBIGUOUS
 BACKUP_INVALID
 FOOD_INCOMPLETE
 RECIPE_UNRESOLVED
@@ -1607,9 +1655,9 @@ Log useful development information to the console.
 
 ---
 
-# 26. Food Matching Design
+# 30. Food Matching Design
 
-Implement deterministic matching before asking AI.
+Implement deterministic matching before requiring manual resolution.
 
 Example:
 
@@ -1620,8 +1668,10 @@ matchFood("weet bix")
 should check:
 
 ```text
+same AFCD source identifier
 normalized food name
 known aliases
+exact AFCD name or identifier
 ```
 
 Do not perform overly aggressive fuzzy matching.
@@ -1636,7 +1686,7 @@ rather than silently accepted.
 
 ---
 
-# 27. Calculation Rules
+# 31. Calculation Rules
 
 All calculations must ultimately flow through central functions.
 
@@ -1658,7 +1708,7 @@ UI code must not reproduce these calculations manually.
 
 ---
 
-# 28. Date Handling
+# 32. Date Handling
 
 Store diary dates as local calendar dates:
 
@@ -1682,7 +1732,7 @@ Period and diary logic must operate using local dates.
 
 ---
 
-# 29. Accessibility
+# 33. Accessibility
 
 Required:
 
@@ -1690,14 +1740,14 @@ Required:
 * labels for all inputs
 * keyboard navigation
 * visible focus states
-* accessible microphone status
+* accessible import validation and confirmation status
 * meaningful button text or ARIA labels
 * reasonable contrast
 * no colour-only status indicators
 
 ---
 
-# 30. UI Behaviour
+# 34. UI Behaviour
 
 Optimise common actions.
 
@@ -1719,7 +1769,7 @@ Do not require navigating through several screens for each diary item.
 
 ---
 
-# 31. Testing Strategy
+# 35. Testing Strategy
 
 Use automated tests for deterministic code.
 
@@ -1732,7 +1782,9 @@ recipes
 weekly boundaries
 goal progress
 backup validation
-AI schema validation
+AFCD catalogue generation and validation
+food and recipe JSON schema validation
+atomic recipe imports
 ```
 
 UI testing may initially be manual.
@@ -1741,7 +1793,7 @@ Never rely solely on manual testing for numerical logic.
 
 ---
 
-# 32. Required Unit Tests
+# 36. Required Unit Tests
 
 ## Food formula
 
@@ -1815,7 +1867,7 @@ progress = 50%
 
 ---
 
-# 33. Integration Tests
+# 37. Integration Tests
 
 At least manually verify:
 
@@ -1834,32 +1886,34 @@ Import
 Verify restoration
 ```
 
-AI integration test:
+Reference and JSON import tests:
 
 ```text
-Enter natural-language meal
-Receive interpretation
-Resolve food matches
-Confirm
-Observe diary update
+Search for an AFCD food
+Review official nutrition and locally calculated PP
+Cancel and verify nothing was saved
+Repeat, confirm, and verify one sourced food record was created
+Select the same AFCD food again and verify that record is reused
 
-Enter food nutrition and serving text
-Receive structured food interpretation
+Paste a valid food-import document
 Review locally calculated PP
 Cancel and verify nothing was saved
 Repeat and confirm one ordinary food record was created
 
-Enter a recipe containing a food absent from the database
-Choose Add food with AI for the unresolved ingredient
-Receive a visibly labelled, editable nutritional estimate
-Cancel and verify the recipe remains unresolved
-Repeat, confirm the food, and verify return to the preserved recipe review
-Confirm the recipe and verify that it references the new saved food
+Paste a recipe-import bundle containing a saved food, an AFCD food, and a new external food
+Review every match and proposed creation
+Cancel and verify nothing was saved
+Repeat and confirm the bundle
+Verify missing foods and the recipe were created atomically
+Verify every ingredient references a saved food ID
+
+Paste malformed, unsupported, and ambiguous documents
+Verify each is rejected without changing the database and remains editable
 ```
 
 ---
 
-# 34. Sample Seed Data
+# 38. Sample Seed Data
 
 During development only, provide an optional seed script with:
 
@@ -1880,23 +1934,7 @@ Do not automatically install seed data in production mode.
 
 ---
 
-# 35. Configuration
-
-Provide:
-
-```text
-.env.example
-```
-
-Example:
-
-```text
-OPENAI_API_KEY=
-OPENAI_TEXT_MODEL=
-OPENAI_VISION_MODEL=
-OPENAI_TRANSCRIPTION_MODEL=
-PORT=3000
-```
+# 39. Configuration
 
 Application defaults:
 
@@ -1906,11 +1944,16 @@ weekly allowance = 49
 week starts Monday
 weight unit = kg
 height unit = cm
+food import schema version = 1
+recipe import schema version = 1
+AFCD catalogue release = generated metadata value
 ```
+
+Production configuration must contain no secrets. The local development server exists only to serve static files during development.
 
 ---
 
-# 36. README Requirements
+# 40. README Requirements
 
 README must contain:
 
@@ -1919,8 +1962,6 @@ README must contain:
 ```text
 git clone
 npm install
-copy .env.example to .env
-set OPENAI_API_KEY
 npm start
 ```
 
@@ -1933,8 +1974,9 @@ Briefly explain:
 ```text
 browser
 IndexedDB
-backend
-OpenAI
+bundled AFCD catalogue
+versioned JSON schemas
+static GitHub Pages deployment
 ```
 
 ## Data storage
@@ -1945,80 +1987,44 @@ State clearly that normal application data is stored locally in IndexedDB.
 
 Explain export/restore.
 
-## API key
+## Reference data and JSON authoring
 
-State clearly:
-
-```text
-Never place the OpenAI API key in public/js files.
-```
+Document the AFCD release, FSANZ attribution and licence obligations, catalogue regeneration process, import schemas, examples, validation behaviour, and optional use of an external authoring tool. State clearly that the application has no integrated AI service and needs no API key.
 
 ---
 
-# 37. Security Requirements
+# 41. Security Requirements
 
 The implementation must not:
 
-* expose the API key
 * accept arbitrary executable content
 * use `eval`
-* insert AI response strings using unsafe `innerHTML`
+* insert imported strings using unsafe `innerHTML`
 * trust imported backup content
-* trust AI JSON without validation
+* trust pasted JSON without validation
+* accept prototype-pollution keys or unexpected schema properties
 
 Prefer safe DOM construction or escaped rendering.
 
-Apply reasonable upload limits to:
+Apply reasonable size limits to:
 
 ```text
-audio
-images
 backup JSON
+pasted food JSON
+pasted recipe JSON
 ```
 
 ---
 
-# 38. Privacy Requirements
+# 42. Privacy Requirements
 
-Do not send unnecessary personal data to OpenAI.
+The application must not transmit personal data, food records, recipes, diary history, weights, or pasted JSON to a remote application service.
 
-For meal interpretation send only:
-
-```text
-meal text
-```
-
-For recipe interpretation send only:
-
-```text
-recipe text
-```
-
-For label scanning send:
-
-```text
-label image
-```
-
-For transcription send:
-
-```text
-audio
-```
-
-Do not routinely send:
-
-```text
-name
-weight
-target
-date of birth
-diary history
-```
+External JSON authoring is initiated separately by the user. The checked-in authoring guide must advise users to provide only the food, label, or recipe information needed and never upload a Points Tracker backup or unrelated personal history.
 
 ---
 
-# 39. Non-Functional Requirements
+# 43. Non-Functional Requirements
 
 The application should:
 
@@ -2033,7 +2039,7 @@ The application should:
 
 ---
 
-# 40. Definition of Done — Version 1
+# 44. Definition of Done — Version 1
 
 Version 1 is complete when all of the following work:
 
@@ -2054,21 +2060,23 @@ Version 1 is complete when all of the following work:
 ✓ Display weight history
 ✓ Export backup
 ✓ Restore backup
-✓ Type a meal in natural language
-✓ Create a food from typed or pasted nutrition facts
-✓ Dictate a meal
-✓ Dictate a recipe
-✓ Scan a nutrition label
-✓ Review all AI interpretations
+✓ Search saved foods and the AFCD catalogue together
+✓ Import an AFCD food as an ordinary sourced food record
+✓ Paste and validate food JSON
+✓ Paste and validate a recipe bundle
+✓ Review every proposed match and creation
 ✓ Confirm or correct before saving
-✓ Core application works offline
+✓ Atomically create missing foods and an imported recipe
+✓ Reject invalid JSON without changing data
+✓ Core application and AFCD catalogue work offline
+✓ No integrated AI service, API key, or hosted backend is required
 ```
 
 No blocking console errors should remain.
 
 ---
 
-# 41. Codex Working Instructions
+# 45. Codex Working Instructions
 
 When implementing this repository:
 
@@ -2082,45 +2090,30 @@ When implementing this repository:
 8. Use schema migrations rather than deleting databases.
 9. Do not invent undocumented Points rules.
 10. If a business-rule ambiguity is encountered, isolate it behind configuration rather than hard-coding a guess.
-11. Keep AI optional.
-12. Never allow an AI response to become authoritative nutritional or points data without validation and confirmation.
+11. Keep external authoring tools optional and outside the application.
+12. Never allow imported JSON to provide authoritative Points or bypass nutritional validation and confirmation.
 13. Update README when setup or architecture changes.
 14. Keep commits logically scoped if operating in a Git repository.
+15. Preserve AFCD attribution, licence, limitation notice, source release, and reproducible generation steps.
+16. Treat M10-M14 as historical, superseded work; do not extend those features.
 
 ---
 
-# 42. First Codex Task
+# 46. Current Next Task
 
-Begin with Milestones M0–M2 only.
+M0-M14 have been implemented. The approved architecture now supersedes M10-M14.
 
-Specifically:
-
-```text
-1. Create the repository skeleton.
-2. Implement the responsive application shell.
-3. Implement navigation.
-4. Implement IndexedDB creation and CRUD wrapper.
-5. Implement the complete deterministic points module.
-6. Write unit tests for:
-   - food Points
-   - rounding
-   - male allowance
-   - female allowance
-   - minimum allowance
-   - date-of-birth age calculation
-7. Add setup instructions to README.
-```
-
-Do not implement foods, diary, recipes, OpenAI integration, voice, or image scanning yet.
-
-After M0–M2 are complete, run the tests and report:
+The next implementation checkpoint is M15 only:
 
 ```text
-files created
-architecture decisions
-test results
-remaining issues
-recommended next milestone
+1. Remove all integrated AI, voice, and label-scanning UI.
+2. Remove the browser AI client and Node/OpenAI backend.
+3. Remove API-key and backend configuration.
+4. Preserve existing application data and all non-AI behaviour.
+5. Add the shared JSON paste, parse, validate, and preview foundation.
+6. Add initial Version 1 schema files, authoring instructions, and examples.
+7. Replace AI-specific tests with importer-foundation tests.
+8. Update README and run the complete test suite.
 ```
 
-That report is the checkpoint before proceeding to M3.
+Do not begin AFCD catalogue integration until M15 tests pass and the removal/import-foundation checkpoint has been reviewed.

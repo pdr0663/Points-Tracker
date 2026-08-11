@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "type": "food-import",
+  "food": {
+    "name": "Greek yoghurt",
+    "brand": "Example Brand",
+    "source": { "kind": "external-json" },
+    "nutritionPer100g": {
+      "protein": 9.5,
+      "carbohydrate": 6.2,
+      "fat": 2.8,
+      "fibre": 0
+    },
+    "servings": [
+      { "description": "1 tub", "grams": 170 }
+    ]
+  }
+}
+

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "type": "recipe-import",
+  "foods": [
+    {
+      "importKey": "greek-yoghurt",
+      "name": "Greek yoghurt",
+      "brand": "Example Brand",
+      "source": { "kind": "external-json" },
+      "nutritionPer100g": {
+        "protein": 9.5,
+        "carbohydrate": 6.2,
+        "fat": 2.8,
+        "fibre": 0
+      },
+      "servings": [
+        { "description": "1 tub", "grams": 170 }
+      ]
+    }
+  ],
+  "recipe": {
+    "name": "Yoghurt bowl",
+    "servings": 1,
+    "ingredients": [
+      { "foodImportKey": "greek-yoghurt", "quantity": 170, "unit": "g" }
+    ]
+  }
+}
+

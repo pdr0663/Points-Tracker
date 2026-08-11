@@ -12,9 +12,9 @@ The application must support:
 * recipes
 * weight tracking
 * progress toward a target weight
-* AI-assisted meal, recipe, and food entry using text, voice, and nutrition-label images
+* selection from an Australian reference-food catalogue
+* validated food and recipe import from pasted JSON
 * local-first operation
-* secure use of the OpenAI API
 * backup and restore
 
 The application is intended for personal household use, not commercial distribution.
@@ -23,9 +23,9 @@ The design priority is extremely low-friction food entry.
 
 The core principle is:
 
-**AI interprets; deterministic code calculates; the user confirms.**
+**Reference data and imported JSON describe food; deterministic code calculates; the user confirms.**
 
-AI must never be the authoritative calculator for Points.
+The application must not depend on an integrated AI service, remote API, or secret credential.
 
 ---
 
@@ -90,24 +90,15 @@ Do not use `localStorage` for substantive application data.
 * current screen
 * display settings
 
-## 3.3 AI backend
+## 3.3 Reference data and imports
 
-The OpenAI API key must never be embedded in browser JavaScript.
+The production application must remain a static browser application suitable for GitHub Pages.
 
-Provide a small backend API or serverless function which:
+Provide a compact, read-only catalogue derived from the Australian Food Composition Database (AFCD). The catalogue must be generated during development and published as static data; normal food searches must not require a runtime API call.
 
-1. accepts text, image, or audio input from the application
-2. calls the OpenAI API
-3. requests structured JSON output
-4. returns validated structured data to the browser
+Food and recipe JSON must be parsed and validated entirely in the browser. Imported content is data only and must never be executed.
 
-The backend must read the OpenAI API key from an environment variable.
-
-Recommended environment variable:
-
-`OPENAI_API_KEY`
-
-The architecture should make it possible to deploy the backend using a low-cost or free serverless platform.
+No OpenAI API key, hosted Node service, user authentication service, or other secret credential is required for Version 1.
 
 ---
 
@@ -152,9 +143,9 @@ function calculatePoints({
 }
 ```
 
-Do not allow AI responses to provide an authoritative Points value.
+Do not accept imported Points values as authoritative.
 
-If AI supplies a point value, ignore it and recalculate locally.
+If imported JSON contains a Points value, reject that field and recalculate locally from validated nutrition.
 
 ## 4.2 Rounding
 
@@ -368,11 +359,18 @@ Example:
     "fat": 2.8,
     "fibre": 0
   },
-  "defaultServing": {
-    "description": "1 tub",
-    "grams": 170
+  "servings": [
+    {
+      "description": "1 tub",
+      "grams": 170
+    }
+  ],
+  "isZeroPoint": false,
+  "source": {
+    "kind": "manual",
+    "referenceId": null,
+    "referenceRelease": null
   },
-  "source": "nutrition-label",
   "createdAt": "2026-08-10T03:00:00Z",
   "updatedAt": "2026-08-10T03:00:00Z"
 }
@@ -553,375 +551,185 @@ and see points recalculate immediately.
 
 ---
 
-# 15. AI Design Principle
+# 15. Reference Food Catalogue
 
-All AI functionality must follow this sequence:
+The application must include a read-only catalogue derived from the Australian Food Composition Database (AFCD).
 
-```text
-unstructured user input
-        ↓
-OpenAI interpretation
-        ↓
-structured JSON
-        ↓
-schema validation
-        ↓
-database matching
-        ↓
-deterministic calculations
-        ↓
-human review
-        ↓
-save
-```
+The published catalogue should contain only the fields needed by the application, including:
 
-The application must never save AI-generated food or diary data without presenting the interpreted result to the user first.
+* AFCD food identifier
+* food name and useful search terms
+* classification information needed for deterministic zero-point handling
+* protein, carbohydrate, fat, and fibre per 100 g
+* source release and attribution metadata
+
+The generated catalogue must be versioned, reproducible from the official source files, and accompanied by the required FSANZ attribution, licence, and limitation notice.
+
+The reference catalogue is not directly editable. Selecting an AFCD food copies a nutritional snapshot into the ordinary shared food database. Existing diary entries and recipes must never change merely because the bundled AFCD release is later updated.
 
 ---
 
-# 16. AI Text Entry
+# 16. Combined Food Selection
 
-## 16.1 Meal entry
+Food selection must search both:
 
-The user may enter natural language such as:
+1. the user's shared food database
+2. the bundled AFCD reference catalogue
+
+Saved foods should appear first. AFCD results must be visibly identified as reference foods.
+
+When the user selects an AFCD item, show its name, nutritional values, source, locally calculated Points, and any available or user-defined serving information. Confirmation imports it as one ordinary food record and continues the initiating diary or recipe workflow.
+
+An AFCD food already imported must be reused by source identifier rather than duplicated. The user may create aliases and serving sizes without changing the read-only reference catalogue.
+
+---
+
+# 17. External JSON Import
+
+The Foods and Recipes screens must provide explicit actions:
 
 ```text
-Two weetbix with 150 ml milk and half a banana
+Paste food JSON
+Paste recipe JSON
 ```
 
-The AI should return structured items such as:
+The application may accept bare JSON or a single Markdown `json` code fence for convenient copying from an external authoring tool. It must not accept explanatory prose surrounding the JSON.
+
+Every import document must contain:
+
+```text
+schemaVersion
+type
+```
+
+Supported Version 1 document types are:
+
+```text
+food-import
+recipe-import
+```
+
+The schema files, authoring instructions, and worked examples must be stored in the repository so any external tool can generate compatible data. Use of ChatGPT or any other authoring tool remains optional and occurs entirely outside the application.
+
+---
+
+# 18. Food JSON Import
+
+A food import creates one reusable food record. It may identify an AFCD reference food or provide a complete custom food definition.
+
+Example custom food document:
 
 ```json
 {
-  "type": "meal-entry",
-  "items": [
-    {
-      "description": "Weet-Bix",
-      "quantity": 2,
-      "unit": "each"
+  "schemaVersion": 1,
+  "type": "food-import",
+  "food": {
+    "name": "Greek yoghurt",
+    "brand": "Example Brand",
+    "source": { "kind": "external-json" },
+    "nutritionPer100g": {
+      "protein": 9.5,
+      "carbohydrate": 6.2,
+      "fat": 2.8,
+      "fibre": 0
     },
-    {
-      "description": "milk",
-      "quantity": 150,
-      "unit": "ml"
-    },
-    {
-      "description": "banana",
-      "quantity": 0.5,
-      "unit": "each"
-    }
-  ]
+    "servings": [
+      { "description": "1 tub", "grams": 170 }
+    ]
+  }
 }
 ```
 
-The app must then attempt to match each item against its own food database.
+An AFCD import may instead use:
 
-Show matches to the user before saving.
-
-Example:
-
-```text
-2 × Weet-Bix                 3.4 PP
-150 ml full cream milk       2.8 PP
-½ banana                     0.0 PP
-
-Total                        6.2 PP
-
-[ Correct ]        [ Add to breakfast ]
+```json
+"source": { "kind": "afcd", "foodId": "official-id" }
 ```
 
-## 16.2 Food record creation
+For an AFCD source, the application must resolve the identifier against its bundled catalogue and use the catalogue nutrition rather than trusting duplicated nutritional values in the pasted document.
 
-The Foods screen must offer AI-assisted creation from typed or pasted text.
-This is distinct from entering a meal: it creates one reusable food record in
-the existing shared food database.
+Imported JSON must never provide an authoritative Points value. Unknown required nutritional values must not silently become zero.
 
-Example input:
+---
 
-```text
-Example Brand Greek yoghurt. Per 100 g: protein 9.5 g,
-carbohydrate 6.2 g, fat 2.8 g, fibre 0 g. One tub is 170 g.
-```
+# 19. Recipe JSON Import
 
-Canonical interpretation:
+A recipe import is a self-contained bundle containing a recipe plus the food definitions or AFCD references needed to resolve its ingredients.
+
+Example shape:
 
 ```json
 {
-  "type": "food",
-  "name": "Greek yoghurt",
-  "brand": "Example Brand",
-  "servings": [
+  "schemaVersion": 1,
+  "type": "recipe-import",
+  "foods": [
     {
-      "description": "1 tub",
-      "grams": 170
+      "importKey": "chicken",
+      "name": "Chicken thigh, cooked",
+      "source": { "kind": "afcd", "foodId": "official-id" }
+    },
+    {
+      "importKey": "sauce",
+      "name": "Example tomato sauce",
+      "source": { "kind": "external-json" },
+      "nutritionPer100g": {
+        "protein": 1.5,
+        "carbohydrate": 7.0,
+        "fat": 0.5,
+        "fibre": 1.2
+      },
+      "servings": []
     }
   ],
-  "nutrition": {
-    "basis": "per-100g",
-    "servingGrams": null,
-    "protein": 9.5,
-    "carbohydrate": 6.2,
-    "fat": 2.8,
-    "fibre": 0
+  "recipe": {
+    "name": "Chicken tomato casserole",
+    "servings": 4,
+    "ingredients": [
+      { "foodImportKey": "chicken", "quantity": 500, "unit": "g" },
+      { "foodImportKey": "sauce", "quantity": 400, "unit": "g" }
+    ]
   }
 }
 ```
 
-The feature has two explicit modes:
+Each `foodImportKey` is local to the import document. It must resolve to exactly one food definition. The application then matches or creates ordinary food records and replaces import keys with persistent food IDs.
 
-```text
-extract stated nutrition
-estimate generic nutrition
-```
+The recipe cannot be confirmed until every ingredient resolves to a saved food record.
 
-In extraction mode, the AI must extract only facts present in the input.
-Unknown names, brands, servings, serving weights, and nutrient values remain
-`null`. In estimate mode, the AI may offer typical generic nutritional values
-for the named food. It must not calculate or return Points in either mode.
+---
 
-Nutrition may use `per-100g` or `per-serving` as its basis. For per-serving
-input, preserve the stated nutrient values and serving weight; deterministic
-browser code converts them to per-100-g values. Insufficient conversion data
-must remain unresolved.
+# 20. Import Review and Transaction Behaviour
 
-The review must reuse the ordinary food editor and show:
+Before writing anything, show:
 
-* original text
-* name and brand
-* nutrition values and their original basis
-* named servings and gram weights
+* the parsed food or recipe
+* AFCD references and their resolved names
+* existing saved-food matches
+* foods that would be created
+* possible duplicates or conflicts
 * missing or invalid fields
-* possible duplicate saved foods
-* locally calculated Points per 100 g and default serving
-* whether the source is stated AI extraction or an AI estimate
+* locally calculated Points
 
-Every extracted value must be editable. A complete valid record and explicit
-confirmation are required before saving. Confirmation saves through the normal
-food service; there must not be a separate AI-food database.
+All imported values must be editable through the ordinary food or recipe editors before confirmation.
 
-Estimate mode must be a deliberate user action. The application must visibly
-label and store estimated provenance itself; it must not trust the model to
-self-certify an estimate as stated information. An estimate must never silently
-replace missing stated information or a food already matched in the database.
+A food import is written only after explicit confirmation. A recipe bundle must insert all confirmed missing foods and the recipe in one IndexedDB transaction so a failure cannot leave a partially imported recipe. Cancelling the preview writes nothing.
 
 ---
 
-# 17. Voice Input
+# 21. Food Matching and Unknown Foods
 
-The application must support push-to-record voice entry.
+Matching priority is:
 
-The intended workflow is:
+1. existing food with the same AFCD source identifier
+2. exact saved-food name
+3. known alias
+4. exact AFCD reference
+5. possible saved-food or AFCD candidate requiring user confirmation
+6. unresolved
 
-```text
-tap microphone
-    ↓
-record
-    ↓
-tap stop
-    ↓
-send audio to backend
-    ↓
-OpenAI transcription
-    ↓
-structured interpretation
-    ↓
-review
-    ↓
-save
-```
+Never silently replace or overwrite an existing saved food.
 
-Do not implement always-listening voice behaviour.
-
-Primary voice use cases:
-
-## 17.1 Meal entry
-
-Example:
-
-```text
-Lunch: two slices of sourdough with ten grams of butter,
-two eggs and a small banana.
-```
-
-## 17.2 Recipe entry
-
-Example:
-
-```text
-Recipe: five hundred grams chicken thighs,
-one onion, two tablespoons olive oil,
-a four hundred gram tin of tomatoes,
-two hundred grams mushrooms,
-serves four.
-```
-
-The system should handle natural corrections where possible.
-
-Example:
-
-```text
-Two slices of toast with butter —
-actually make that ten grams of butter —
-and a poached egg.
-```
-
-The UI must display both:
-
-* transcript
-* interpreted structured result
-
-before confirmation.
-
----
-
-# 18. Nutrition Label Image Import
-
-The user must be able to photograph or upload a nutrition label.
-
-The image should be sent to the AI backend.
-
-AI should extract only factual label information.
-
-Target structured output:
-
-```json
-{
-  "type": "food",
-  "name": "Greek yoghurt",
-  "brand": "Example Brand",
-  "serving": {
-    "description": "1 tub",
-    "grams": 170
-  },
-  "nutritionPer100g": {
-    "protein": 9.5,
-    "carbohydrate": 6.2,
-    "fat": 2.8,
-    "fibre": 0
-  }
-}
-```
-
-If the nutrition panel only provides values per serving, preserve that fact and derive per-100-g values only when sufficient serving weight information exists.
-
-Do not invent missing fibre or other fields.
-
-Missing values should be represented as `null` or otherwise explicitly marked unknown.
-
-The app must show the extracted values for confirmation.
-
----
-
-# 19. AI Recipe Import
-
-Allow recipes to be supplied through:
-
-* typed text
-* pasted recipe text
-* voice
-
-AI should extract:
-
-* recipe name if available
-* servings
-* ingredients
-* quantities
-* units
-
-Example:
-
-```json
-{
-  "type": "recipe",
-  "name": "Chicken tomato casserole",
-  "servings": 4,
-  "ingredients": [
-    {
-      "name": "chicken thighs",
-      "quantity": 500,
-      "unit": "g"
-    },
-    {
-      "name": "onion",
-      "quantity": 1,
-      "unit": "each"
-    }
-  ]
-}
-```
-
-The application must attempt to match each ingredient with an existing food record.
-
-Display match status:
-
-```text
-Chicken thighs       ✓ matched
-Olive oil            ✓ matched
-Onion                 ? unresolved
-Mushrooms             ? unresolved
-```
-
-The user must resolve or approve unresolved ingredients before the recipe is considered complete.
-
-Each unresolved ingredient must offer `Add food with AI`. This opens the same
-AI-assisted food form used by the Foods screen, prefills the ingredient name,
-and requests generic nutritional suggestions. The suggestions must be clearly
-labelled `AI estimate`, editable, and validated before the user can confirm.
-
-Confirming the food creates one ordinary shared food record, returns to the
-preserved recipe review, and automatically matches the ingredient to that new
-food. Cancelling food creation returns to the recipe with the ingredient still
-unresolved. The recipe cannot be confirmed until every ingredient references a
-saved food record.
-
-If the recipe is cancelled after one or more foods were explicitly confirmed,
-those foods remain available because they are complete reusable food records.
-
----
-
-# 20. Food Matching
-
-Food matching must favour the user's own local food database.
-
-Matching priority:
-
-1. exact saved food
-2. known alias
-3. probable saved-food match
-4. unresolved
-
-AI must not silently replace a saved food with a generic nutritional estimate.
-
-Provide a mechanism to assign aliases.
-
-Example:
-
-```text
-"weetbix"
-"Weet-Bix"
-"2 weet bix"
-```
-
-may all map to one saved food record.
-
----
-
-# 21. Unknown Foods
-
-If an interpreted meal contains a food that is not in the database:
-
-1. mark it unresolved
-2. offer to create a food
-3. allow:
-
-   * AI-assisted food creation from typed or pasted nutrition facts
-   * nutrition-label scanning
-   * manual nutrition entry
-   * AI-assisted generic estimate if deliberately enabled
-
-Generic estimates must be visibly labelled as estimates.
-
-The system should favour confirmed nutrition information.
+If a food is not present in the saved database or AFCD, allow manual food creation or a validated `external-json` food definition. A complete nutrition record and explicit confirmation are required before it can be used in a recipe.
 
 ---
 
@@ -1020,29 +828,24 @@ Do not display large red failure indicators merely because of a short-term weigh
 
 ---
 
-# 25. AI Confirmation UI
+# 25. JSON Import Confirmation UI
 
-Every AI operation must end with a review screen.
+Every JSON import must end with a review screen before any data is written.
 
-The review screen should show:
+The review should identify:
 
 ```text
-You said:
-
-"two slices toast with ten grams butter and a poached egg"
-
-Interpreted as:
-
-Sourdough bread      2 slices
-Butter               10 g
-Egg                  1
-
-Calculated points:   7.3 PP
-
-[ Edit ]      [ Confirm ]
+valid document and schema version
+AFCD foods resolved from the bundled catalogue
+existing foods that will be reused
+new foods that will be created
+possible duplicates requiring a decision
+recipe ingredient quantities and units
+locally calculated Points
+validation errors and unresolved entries
 ```
 
-If confidence is low, flag the affected row.
+Provide clear `Edit`, `Confirm`, and `Cancel` actions. Confirmation must remain disabled while any required value or ingredient resolution is incomplete.
 
 ---
 
@@ -1159,122 +962,39 @@ diaryEntries by userId + date
 diaryEntries by foodId
 weighIns by userId + date
 foods by normalizedName
+foods by AFCD source identifier
 ```
 
 Generate UUIDs for persistent objects.
 
 ---
 
-# 32. AI API Endpoints
+# 32. Versioned Import Schemas
 
-Suggested backend interface:
+Publish machine-readable schemas for `food-import` and `recipe-import` with human-readable authoring instructions and valid examples.
 
-## 32.1 Transcribe audio
+Each schema must:
 
-```text
-POST /api/transcribe
-```
+* require `schemaVersion: 1`
+* use an exact supported `type`
+* reject unexpected properties
+* bound string lengths, array lengths, and numeric values
+* allow only supported recipe units
+* require finite, non-negative nutritional values
+* distinguish AFCD references from complete external food definitions
+* exclude Points, calories, advice, executable content, and application record IDs
 
-Input:
-
-* audio file
-
-Output:
-
-```json
-{
-  "transcript": "..."
-}
-```
-
-## 32.2 Interpret meal
-
-```text
-POST /api/interpret-meal
-```
-
-Input:
-
-```json
-{
-  "text": "two weetbix and 150 ml milk"
-}
-```
-
-Output:
-
-structured meal JSON.
-
-## 32.3 Interpret recipe
-
-```text
-POST /api/interpret-recipe
-```
-
-Input:
-
-```json
-{
-  "text": "..."
-}
-```
-
-Output:
-
-structured recipe JSON.
-
-## 32.4 Interpret food
-
-```text
-POST /api/interpret-food
-```
-
-Input:
-
-```json
-{
-  "text": "Example Brand yoghurt, per 100 g: protein 9.5 g...",
-  "mode": "extract"
-}
-```
-
-`mode` is `extract` or `estimate`. The unresolved-recipe Add Food workflow uses
-`estimate` and sends only the missing ingredient description. The backend adds
-the corresponding `ai-text` or `ai-estimate` provenance after model-output
-validation; provenance is not trusted from the model.
-
-Output:
-
-strict structured food interpretation JSON. The route must not accept or return
-an authoritative Points value.
-
-## 32.5 Scan nutrition label
-
-```text
-POST /api/scan-label
-```
-
-Input:
-
-* image
-
-Output:
-
-structured food JSON.
-
-The exact route design may be adjusted, but responsibilities should remain separated.
+Schema evolution must be explicit. A future incompatible format requires a new schema version and importer path rather than silently changing Version 1 semantics.
 
 ---
 
-# 33. Structured AI Output
+# 33. JSON Parsing and Validation
 
-Use JSON-schema-backed structured outputs wherever practical.
+Never use `eval` or attempt to recover data from explanatory prose.
 
-Never attempt to recover important application state by parsing free-form AI prose.
+The importer may remove surrounding whitespace and one complete Markdown JSON code fence, then must parse the remaining content using `JSON.parse` and validate it against the selected schema.
 
-AI output must pass schema validation before being used.
-
-Invalid responses should result in a user-friendly error and the original input must not be lost.
+Validation must occur before matching, calculations, or database writes. Invalid input must produce field-specific, user-friendly errors while preserving the pasted text for correction.
 
 ---
 
@@ -1282,17 +1002,16 @@ Invalid responses should result in a user-friendly error and the original input 
 
 Handle at least:
 
-* no internet connection
-* AI API unavailable
-* invalid AI response
-* microphone permission denied
-* image upload failure
+* invalid JSON syntax
+* unsupported schema version or document type
+* invalid or unexpected fields
+* unknown AFCD identifier
+* duplicate import keys
+* ambiguous saved-food match
 * IndexedDB unavailable
 * invalid backup file
 * missing nutritional values
 * unresolved recipe ingredient
-
-The core application must remain usable without AI availability.
 
 Users must always be able to manually enter food and diary data.
 
@@ -1308,13 +1027,13 @@ Offline-capable functions include:
 * add known food
 * edit diary
 * calculate Points
+* AFCD and saved-food search
+* food and recipe JSON import
 * recipes using known ingredients
 * weigh-in
 * progress screens
 
-AI functionality may require an internet connection.
-
-The UI should distinguish unavailable AI features without blocking local features.
+After the static application and AFCD catalogue are cached, every Version 1 feature should work without a network connection.
 
 ---
 
@@ -1322,35 +1041,19 @@ The UI should distinguish unavailable AI features without blocking local feature
 
 Requirements:
 
-* no OpenAI API key in client JavaScript
-* API key held only server-side
-* validate uploaded file type and size
-* validate all AI JSON
+* validate pasted JSON before use
+* enforce a reasonable pasted-document size limit
+* reject prototype-pollution keys and unexpected properties
 * escape user-provided text before rendering
 * do not execute imported JSON as code
-
-For a personal first release, user authentication is optional.
-
-If the application becomes externally accessible, add authentication to the AI backend.
 
 ---
 
 # 37. Privacy
 
-Minimise information sent to AI.
+The application must not transmit foods, recipes, diary records, weights, or pasted JSON to a remote service.
 
-For example, meal interpretation normally needs only the dictated meal text.
-
-It should not require sending:
-
-* full weight history
-* target weight
-* user name
-* previous diary history
-
-unless necessary for a specific feature.
-
-Do not send the entire local database to OpenAI.
+If the user independently chooses an external tool to create JSON, that interaction is outside the application. Repository authoring guidance should advise users to provide only the recipe, label, or food information needed for the requested import and not their application backup or personal history.
 
 ---
 
@@ -1363,7 +1066,7 @@ Use:
 * high-contrast controls
 * standard HTML form elements
 * explicit labels
-* accessible microphone and image buttons
+* accessible import, edit, confirm, and cancel controls
 
 Primary food-entry controls should be usable one-handed on a mobile phone.
 
@@ -1426,7 +1129,7 @@ Settings should include:
 * point display rounding
 * backup
 * restore
-* OpenAI integration status
+* AFCD catalogue release and attribution
 * food aliases
 * application version
 
@@ -1451,12 +1154,15 @@ One possible implementation:
 │   ├── diary.js
 │   ├── progress.js
 │   ├── backup.js
-│   └── ai.js
-├── server/
-│   ├── server.js
-│   ├── openai.js
-│   ├── schemas.js
-│   └── routes/
+│   ├── reference-foods.js
+│   └── json-import.js
+├── data/
+│   └── afcd-reference.json
+├── schemas/
+│   ├── food-import-v1.schema.json
+│   └── recipe-import-v1.schema.json
+├── tools/
+│   └── build-afcd-catalogue.js
 └── README.md
 ```
 
@@ -1484,7 +1190,7 @@ Implement:
 10. goal progress
 11. backup/restore
 
-This phase must work without AI.
+This phase is complete.
 
 ## Phase 2 — recipes
 
@@ -1496,39 +1202,44 @@ Implement:
 4. points per serving
 5. diary integration
 
-## Phase 3 — AI text
+This phase is complete.
+
+## Phase 3 — integrated-service removal and JSON foundation
 
 Implement:
 
-1. secure backend
-2. text meal interpretation
-3. AI review/confirmation screen
-4. recipe interpretation
-5. unresolved food matching
-6. food-record interpretation from typed or pasted nutrition facts
-7. food review using the ordinary food editor
-8. AI-assisted Add Food for unresolved recipe ingredients
-9. return to and resolve the preserved recipe review after food confirmation
+1. remove the superseded integrated AI UI, server, configuration, and tests
+2. preserve all non-AI behaviour and existing local data
+3. add shared paste, parse, schema-dispatch, validation, and preview infrastructure
+4. add checked-in schema locations, authoring instructions, and examples
 
-## Phase 4 — voice
+## Phase 4 — reference food catalogue
 
 Implement:
 
-1. microphone recording
-2. transcription
-3. meal interpretation
-4. recipe interpretation
-5. review flow
+1. reproducible AFCD source transformation
+2. compact published catalogue and attribution
+3. combined saved-food and AFCD search
+4. AFCD preview and copy-on-use
+5. duplicate prevention by AFCD identifier
 
-## Phase 5 — nutrition-label scanning
+## Phase 5 — versioned JSON import
 
 Implement:
 
-1. image capture/upload
-2. nutrition extraction
-3. structured validation
-4. food review
-5. save to food database
+1. paste handling for bare and fenced JSON
+2. strict food import validation, preview, and confirmation
+3. recipe-bundle matching and preview
+4. atomic creation of missing foods and the recipe
+
+## Phase 6 — offline completion and final QA
+
+Implement:
+
+1. cache the application shell and AFCD catalogue
+2. verify upgrades preserve existing local data
+3. test mobile and desktop import workflows
+4. update user documentation and release notes
 
 ---
 
@@ -1562,48 +1273,29 @@ A recipe with four servings calculates total points and one-quarter of that tota
 
 A 1.5-serving diary entry calculates correctly.
 
-## 44.5 AI meal
+## 44.5 AFCD food selection
 
-Given:
+Searching finds both saved foods and AFCD reference foods, with saved foods first and the source clearly identified.
 
-```text
-two slices of bread and ten grams of butter
-```
+Confirming an AFCD result creates one ordinary food with source metadata and calculated Points. Selecting the same AFCD item again reuses that record.
 
-AI output is shown for review before insertion.
+## 44.6 Food JSON
 
-The application calculates points from matched foods, not from an AI-generated points number.
+Valid bare or fenced `food-import` JSON produces an editable preview. Cancel saves nothing; invalid or incomplete nutrition blocks confirmation; Confirm creates one ordinary shared food record.
 
-## 44.6 AI food
+An AFCD food import resolves nutrition from the bundled catalogue rather than duplicated values in the JSON.
 
-Given typed or pasted food nutrition and serving information, structured output
-is shown in the ordinary food editor before insertion.
+## 44.7 Recipe JSON
 
-Points are calculated from reviewed nutrition by deterministic application code.
-Cancel saves nothing, missing required values block confirmation, and Confirm
-creates one ordinary shared food record.
+A valid `recipe-import` bundle shows existing matches, AFCD resolutions, and foods to be created. Ambiguous and unresolved ingredients block confirmation.
 
-## 44.7 AI recipe with a missing food
+Confirming atomically creates missing foods and a recipe whose ingredients reference the resulting saved food IDs. A forced failure leaves neither a partial recipe nor partial food inserts.
 
-Given an interpreted recipe containing an ingredient absent from the food
-database, `Add food with AI` shows editable nutritional suggestions labelled
-as an AI estimate.
+## 44.8 Invalid import safety
 
-Cancelling returns to the still-unresolved recipe. Confirming creates an
-ordinary food, returns to the preserved recipe review, and resolves the
-ingredient. The subsequently confirmed recipe references that food record.
+Malformed JSON, unsupported versions, unexpected fields, Points fields, duplicate import keys, and unknown AFCD identifiers are rejected without database changes. The pasted text remains available for correction.
 
-## 44.8 Voice
-
-Recorded speech is transcribed and the transcript remains visible during confirmation.
-
-No diary data is saved until confirmation.
-
-## 44.9 Nutrition label
-
-An image-derived food record is shown to the user before being written to the food database.
-
-## 44.10 Backup
+## 44.9 Backup
 
 Export, clear local data, import the backup, and reproduce the original data.
 
@@ -1626,6 +1318,8 @@ Do not initially implement:
 * restaurant databases
 * barcode lookup
 * real-time conversational voice assistant
+* integrated AI, transcription, or nutrition-label image interpretation
+* hosted application backend
 * multi-household cloud synchronisation
 
 These may be considered later.
@@ -1644,7 +1338,7 @@ Potential later features include:
 * activity points
 * nutritional trend analysis
 * frequently repeated meal detection
-* AI-generated food aliases
+* externally generated food aliases supplied through a future schema version
 * automatic weekly summaries
 * installable Progressive Web App
 * server-hosted PostgreSQL/Supabase database
@@ -1659,7 +1353,7 @@ When implementation choices are ambiguous, prefer the option that satisfies thes
 
 1. **Fast food entry**
 2. **Correct deterministic point calculation**
-3. **Simple review of AI interpretation**
+3. **Simple review of reference and imported data**
 4. **Easy correction of mistakes**
 5. **Reliable local data storage**
 6. **Clear progress display**
@@ -1671,6 +1365,6 @@ The application should feel substantially faster to use than a conventional calo
 
 A common meal should normally be recordable in a few seconds.
 
-AI should reduce typing and data entry rather than add complexity.
+External authoring tools may reduce typing, but the application must remain complete and understandable without them.
 
 The user remains the final authority on what was eaten.

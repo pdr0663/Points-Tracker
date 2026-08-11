@@ -77,17 +77,25 @@ test("validates recipe keys, references, units, and positive quantities", () => 
   assert.ok(issues.some((item) => item.path.endsWith("unit")));
 });
 
-test("accepts syntactically valid AFCD references without trusting pasted nutrition", () => {
+test("accepts syntactically valid AFCD references and validates but does not trust pasted nutrition", () => {
   const afcd = structuredClone(validFood);
   afcd.food.source = { kind: "afcd", foodId: "F000001" };
   delete afcd.food.nutritionPer100g;
   assert.deepEqual(validateImportDocument(afcd), []);
   afcd.food.nutritionPer100g = validFood.food.nutritionPer100g;
-  assert.ok(validateImportDocument(afcd).some((item) => item.path === "food.nutritionPer100g"));
+  assert.deepEqual(validateImportDocument(afcd), []);
+  afcd.food.nutritionPer100g.points = 4;
+  assert.ok(validateImportDocument(afcd).some((item) => item.path === "food.nutritionPer100g.points"));
 });
 
 test("enforces the pasted-document byte limit", () => {
   assert.throws(() => parseImportText("x".repeat(MAX_IMPORT_BYTES + 1)), { code: "IMPORT_INVALID" });
+});
+
+test("requires at least one valid serving", () => {
+  const invalid = structuredClone(validFood);
+  invalid.food.servings = [];
+  assert.ok(validateImportDocument(invalid).some((item) => item.path === "food.servings"));
 });
 
 test("published Version 1 examples pass the runtime validator", async () => {

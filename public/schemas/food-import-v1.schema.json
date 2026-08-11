@@ -45,7 +45,7 @@
           "properties": { "kind": { "const": "external-json" } }
         },
         "nutritionPer100g": { "$ref": "#/$defs/nutrition" },
-        "servings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
+        "servings": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
       }
     },
     "afcdFood": {
@@ -64,10 +64,10 @@
             "foodId": { "type": "string", "minLength": 1, "maxLength": 100 }
           }
         },
-        "servings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
+        "nutritionPer100g": { "$ref": "#/$defs/nutrition" },
+        "servings": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
       }
     },
     "food": { "oneOf": [{ "$ref": "#/$defs/externalFood" }, { "$ref": "#/$defs/afcdFood" }] }
   }
 }
-

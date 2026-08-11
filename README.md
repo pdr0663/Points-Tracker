@@ -42,15 +42,17 @@ Historical diary entries retain nutritional and Points snapshots, so later edits
 
 ## JSON authoring and import
 
-The Foods and Recipes screens contain **Paste food JSON** and **Paste recipe JSON** actions. M15 provides:
+The Foods and Recipes screens contain **Paste food JSON** and **Paste recipe JSON** actions. The shared import foundation provides:
 
 - bare JSON or one Markdown `json` code-fence input
 - a 64 KiB pasted-document limit
 - strict parsing, version/type dispatch, and field-specific validation
 - rejection of unknown fields, Points fields, unsafe keys, invalid numbers, and unresolved recipe import keys
-- non-writing preview, Edit, Confirm, and Cancel controls
+- non-writing validation and review before any confirmation
 
-In M15, **Confirm** is deliberately disabled: valid documents reach review but do not write to IndexedDB. Food confirmation is introduced in M17 and transactional recipe-bundle confirmation in M18. The M16 AFCD catalogue is now available for those milestones.
+M17 food imports open in the ordinary editable food form. Review the nutrition, named servings, zero-point choice, and deterministic Points preview, then either confirm creation or explicitly reuse a detected saved food. Cancelling writes nothing. AFCD references are resolved against the bundled catalogue; catalogue nutrition always wins over any pasted nutrition, and unknown identifiers are rejected while the pasted JSON remains available for correction.
+
+Recipe bundles still stop at a non-writing preview. Their transactional confirmation remains reserved for M18.
 
 Published schemas and examples are available at:
 
@@ -95,6 +97,7 @@ The browser application uses dependency-light ES modules under `public/js`:
 - `progress.js` — progress periods, goals, and chart data
 - `backup.js` — portable export, validation, and transactional restore
 - `json-import.js` — pasted JSON normalization, dispatch, and Version 1 validation
+- `food-import.js` — M17 food resolution, duplicate detection, AFCD authority, and confirmation
 - `reference-foods.js` — static AFCD loading, validation, search, and copy-on-use
 - `app.js` — screen rendering and workflow coordination
 
@@ -102,4 +105,4 @@ There is no production server directory. GitHub Pages hosts the complete applica
 
 ## Current milestone
 
-M16 adds the generated AFCD Release 3 catalogue, combined saved/reference search, explicit zero-point review, nutritional preview, copy-on-use, and duplicate prevention by source identifier. M17 is the next checkpoint and will enable food JSON confirmation.
+M17 enables Version 1 food JSON confirmation through the ordinary food editor, including AFCD catalogue resolution, duplicate reuse, serving and zero-point review, and deterministic Points preview. Recipe-bundle writes remain disabled until M18.

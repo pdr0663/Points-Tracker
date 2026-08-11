@@ -29,6 +29,7 @@ import {
   searchFoods,
   updateFood
 } from "./foods.js";
+import { confirmFoodImport, resolveFoodImport } from "./food-import.js";
 import { requiredFormNumber } from "./form-values.js";
 import { roundPoints } from "./points.js";
 import { createWeightChartModel, getProgressSummary } from "./progress.js";
@@ -633,8 +634,11 @@ function createImportFoodPreview(food) {
   return item;
 }
 
-function createJsonImportCard(workflow) {
+function createJsonImportCard(workflow, context = {}) {
   const label = importTypeLabel(workflow.expectedType);
+  if (workflow.stage === "food-review") {
+    return createFoodForm(workflow.resolution.candidate, { importWorkflow: workflow });
+  }
   const card = createElement("section", { className: "card form-card json-import-card" });
 
   if (workflow.stage === "paste") {
@@ -685,8 +689,13 @@ function createJsonImportCard(workflow) {
       workflow.text = textarea.value;
       try {
         workflow.parsed = parseImportText(workflow.text, { expectedType: workflow.expectedType });
+        if (workflow.expectedType === "food-import") {
+          workflow.resolution = resolveFoodImport(workflow.parsed.document, context.catalogue, context.foods);
+          workflow.stage = "food-review";
+        } else {
+          workflow.stage = "preview";
+        }
         workflow.error = undefined;
-        workflow.stage = "preview";
       } catch (error) {
         if (!(error instanceof JsonImportError)) console.error("Could not validate pasted JSON", error);
         workflow.error = error instanceof JsonImportError
@@ -734,8 +743,8 @@ function createJsonImportCard(workflow) {
   card.append(createElement("p", {
     className: "import-foundation-notice",
     text: afcdCount
-      ? `${afcdCount} AFCD ${afcdCount === 1 ? "reference requires" : "references require"} catalogue resolution. M15 provides validation and review only; confirmation will be enabled by later milestones.`
-      : "M15 provides validation and review only. Confirmation and database creation will be enabled by the food and recipe import milestones."
+      ? `${afcdCount} AFCD ${afcdCount === 1 ? "reference requires" : "references require"} catalogue resolution. Recipe bundles remain validation and review only until M18.`
+      : "Recipe bundles remain validation and review only. Confirmation and database creation will be enabled in M18."
   }));
 
   const actions = createElement("div", { className: "form-actions" });
@@ -747,7 +756,7 @@ function createJsonImportCard(workflow) {
   const confirm = createElement("button", {
     className: "button button--primary",
     text: "Confirm",
-    attributes: { type: "button", disabled: "", title: "Saving is introduced in M17 and M18." }
+    attributes: { type: "button", disabled: "", title: "Recipe saving is introduced in M18." }
   });
   const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
   cancel.addEventListener("click", cancelJsonImport);
@@ -836,9 +845,23 @@ function foodInputFromForm(form) {
   };
 }
 
-function createFoodForm(food) {
+function createFoodForm(food, options = {}) {
+  const importWorkflow = options.importWorkflow;
+  const isEditing = Boolean(food?.id) && !importWorkflow;
   const card = createElement("section", { className: "card form-card food-form-card" });
-  card.append(createElement("h3", { text: food ? `Edit ${food.name}` : "Add food" }));
+  card.append(createElement("h3", { text: importWorkflow ? `Review imported food` : isEditing ? `Edit ${food.name}` : "Add food" }));
+  if (importWorkflow) {
+    const source = food.source.kind === "afcd"
+      ? `${food.source.referenceRelease} · ${food.source.referenceId}; catalogue nutrition is used`
+      : "External JSON nutrition";
+    card.append(createElement("p", { className: "notice", text: `${source}. Review every field, serving, zero-point setting, and Points preview before confirming.` }));
+    if (importWorkflow.resolution.existing) {
+      card.append(createElement("p", {
+        className: "notice",
+        text: `Possible duplicate: ${importWorkflow.resolution.existing.name}${importWorkflow.resolution.existing.brand ? ` · ${importWorkflow.resolution.existing.brand}` : ""} is already saved.`
+      }));
+    }
+  }
   const form = createElement("form", { className: "data-form" });
   const fields = createElement("div", { className: "form-grid" });
   fields.append(
@@ -860,7 +883,7 @@ function createFoodForm(food) {
   const servingRows = createElement("div", { className: "serving-rows" });
   const initialServings = food?.servings?.length ? food.servings : [{}];
   initialServings.forEach((serving, index) => {
-    servingRows.append(createServingRow(serving, food ? serving.id === food.defaultServingId : index === 0));
+    servingRows.append(createServingRow(serving, food?.defaultServingId ? serving.id === food.defaultServingId : index === 0));
   });
   const addServing = createElement("button", { className: "button button--secondary", text: "Add serving", attributes: { type: "button" } });
   addServing.addEventListener("click", () => servingRows.append(createServingRow()));
@@ -876,7 +899,7 @@ function createFoodForm(food) {
       const input = foodInputFromForm(form);
       const defaultServing = input.servings.find((serving) => serving.id === input.defaultServingId);
       if (!defaultServing || !defaultServing.grams) return;
-      const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing };
+      const preview = { nutritionPer100g: input.nutritionPer100g, defaultServing, isZeroPoint: input.isZeroPoint };
       calculation.textContent = `${displayPoints(foodPointsPer100g(preview))} PP per 100 g · ${displayPoints(foodPointsForDefaultServing(preview))} PP per ${defaultServing.description || "default serving"}`;
     } catch {
       calculation.textContent = "Enter nutrition and a default serving to calculate Points.";
@@ -887,14 +910,50 @@ function createFoodForm(food) {
 
   const message = createFormMessage();
   const actions = createElement("div", { className: "form-actions" });
-  const submit = createElement("button", { className: "button button--primary", text: food ? "Save changes" : "Create food", attributes: { type: "submit" } });
+  const submitText = importWorkflow
+    ? importWorkflow.resolution.existing ? "Create separate food" : "Confirm food"
+    : isEditing ? "Save changes" : "Create food";
+  const submit = createElement("button", { className: "button button--primary", text: submitText, attributes: { type: "submit" } });
   const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
   cancel.addEventListener("click", () => {
+    if (importWorkflow) {
+      cancelJsonImport();
+      return;
+    }
     showingFoodForm = false;
     editingFoodId = undefined;
     void renderCurrentRoute();
   });
-  actions.append(submit, cancel);
+  actions.append(submit);
+  if (importWorkflow?.resolution.existing) {
+    const reuse = createElement("button", { className: "button button--secondary", text: "Reuse saved food", attributes: { type: "button" } });
+    reuse.addEventListener("click", async () => {
+      reuse.disabled = true;
+      submit.disabled = true;
+      showFormMessage(message, "Reusing saved food…", "progress");
+      try {
+        const result = await confirmFoodImport(importWorkflow.resolution, undefined, { reuseExisting: true });
+        jsonImportWorkflow = undefined;
+        foodNotice = `${result.food.name} was already saved and has been reused.`;
+        await renderCurrentRoute();
+      } catch (error) {
+        console.error("Could not reuse imported food", error);
+        showFormMessage(message, error.message);
+        reuse.disabled = false;
+        submit.disabled = false;
+      }
+    });
+    actions.append(reuse);
+  }
+  if (importWorkflow) {
+    const editJson = createElement("button", { className: "button button--secondary", text: "Edit JSON", attributes: { type: "button" } });
+    editJson.addEventListener("click", () => {
+      importWorkflow.stage = "paste";
+      void renderCurrentRoute();
+    });
+    actions.append(editJson);
+  }
+  actions.append(cancel);
 
   form.append(fields, zeroPointLabel, servingSection, calculation, message, actions);
   form.addEventListener("submit", async (event) => {
@@ -903,10 +962,14 @@ function createFoodForm(food) {
     showFormMessage(message, "Saving food…", "progress");
     try {
       const input = foodInputFromForm(form);
-      const saved = food ? await updateFood(food.id, input) : await createFood(input);
+      const result = importWorkflow
+        ? await confirmFoodImport(importWorkflow.resolution, input)
+        : { food: isEditing ? await updateFood(food.id, input) : await createFood(input), created: !isEditing };
+      const saved = result.food;
       showingFoodForm = false;
       editingFoodId = undefined;
-      foodNotice = `${saved.name} ${food ? "updated" : "created"}.`;
+      if (importWorkflow) jsonImportWorkflow = undefined;
+      foodNotice = importWorkflow ? `${saved.name} imported.` : `${saved.name} ${isEditing ? "updated" : "created"}.`;
       await renderCurrentRoute();
     } catch (error) {
       console.error("Could not save food", error);
@@ -1136,7 +1199,7 @@ function renderFoodsScreen(foods, referenceFoods, catalogue, referenceError) {
   }
 
   if (jsonImportWorkflow?.expectedType === "food-import") {
-    screen.append(createJsonImportCard(jsonImportWorkflow));
+    screen.append(createJsonImportCard(jsonImportWorkflow, { foods, catalogue }));
     return screen;
   }
 

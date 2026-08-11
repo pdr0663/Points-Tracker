@@ -20,6 +20,8 @@ python -m http.server 8000 --directory public
 
 Then open `http://localhost:8000`.
 
+Use `localhost` rather than opening `index.html` directly: service workers require a secure context, which includes HTTPS deployments and local HTTP development.
+
 Run the automated tests with:
 
 ```powershell
@@ -31,6 +33,18 @@ npm test
 The workflow in `.github/workflows/pages.yml` runs the complete test suite and publishes only the `public` directory. In the repository settings, select **GitHub Actions** as the Pages source.
 
 All application asset paths are relative, so deployment beneath a repository subpath is supported.
+
+## Offline installation and updates
+
+After one successful online load, the service worker caches the complete application shell, all JavaScript and CSS, import schemas and examples, icons, and the AFCD catalogue. Tracking, saved/reference food search, food and recipe imports, progress, export, and restore then continue to work without a network connection; household data remains in IndexedDB.
+
+The manifest supports installation from browsers that offer **Install app** or **Add to Home Screen**. A newly deployed service worker precaches its complete version before activation, removes older Points Tracker caches, and takes control without deleting IndexedDB data. If an interrupted first load prevents installation, reconnect and reload once so the complete cache can be created. Browser storage clearing removes both offline assets and local household data, so export a backup first.
+
+Regenerate the checked-in 192 px and 512 px icons on Windows with:
+
+```powershell
+npm run build:icons
+```
 
 ## Data and backups
 
@@ -101,11 +115,14 @@ The browser application uses dependency-light ES modules under `public/js`:
 - `json-import.js` — pasted JSON normalization, dispatch, and Version 1 validation
 - `food-import.js` — M17 food resolution, duplicate detection, AFCD authority, and confirmation
 - `recipe-import.js` — M18 ordered food resolution, conflict choices, preview, and atomic bundle confirmation
+- `pwa.js` — optional service-worker registration without affecting application startup
 - `reference-foods.js` — static AFCD loading, validation, search, and copy-on-use
 - `app.js` — screen rendering and workflow coordination
+
+`public/service-worker.js` owns the versioned application cache and offline request recovery. `public/manifest.webmanifest` and `public/icons` provide install metadata and maskable icons.
 
 There is no production server directory. GitHub Pages hosts the complete application.
 
 ## Current milestone
 
-M18 enables Version 1 recipe-bundle review and atomic confirmation, including saved-food and alias reuse, AFCD resolution, explicit conflict choices, deterministic Points preview, and rollback without partial records. It also makes the AFCD source hash portable across GitHub's Linux runner. M19 offline/PWA completion is next.
+M19 completes the installable offline application: the full Version 1 shell, imports, AFCD catalogue, progress, and backup features are cached after the first successful load, with versioned update cleanup and offline recovery. M20 final QA and documentation is next.

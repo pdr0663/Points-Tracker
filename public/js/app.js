@@ -34,6 +34,7 @@ import { confirmFoodImport, resolveFoodImport } from "./food-import.js";
 import { requiredFormNumber } from "./form-values.js";
 import { roundPoints } from "./points.js";
 import { createWeightChartModel, getProgressSummary } from "./progress.js";
+import { registerServiceWorker } from "./pwa.js";
 import {
   calculateRecipe,
   createRecipe,
@@ -2453,3 +2454,5 @@ startApplication().catch((error) => {
   });
   main.replaceChildren(message);
 });
+
+void registerServiceWorker();

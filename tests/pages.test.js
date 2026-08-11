@@ -6,8 +6,10 @@ test("GitHub Pages entry point uses repository-subpath-safe asset URLs", async (
   const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 
   assert.match(html, /href="\.\/css\/app\.css"/);
+  assert.match(html, /href="\.\/manifest\.webmanifest"/);
+  assert.match(html, /href="\.\/icons\/icon\.svg"/);
   assert.match(html, /src="\.\/js\/app\.js"/);
-  assert.doesNotMatch(html, /(?:href|src)="\/(?:css|js)\//);
+  assert.doesNotMatch(html, /(?:href|src)="\/(?:css|icons|js)\//);
   assert.doesNotMatch(html, /points-tracker-api-base/);
 });
 

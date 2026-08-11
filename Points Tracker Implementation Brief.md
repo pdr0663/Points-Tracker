@@ -1571,6 +1571,8 @@ Implement or complete the manifest and service worker. Cache the application she
 
 After first successful load, all Version 1 tracking, reference search, food import, recipe import, progress, and backup features must work offline.
 
+Use relative manifest, registration, and cache URLs so the PWA remains installable beneath the GitHub Pages repository subpath. Activate only after the complete versioned precache succeeds, delete only stale Points Tracker caches, and preserve IndexedDB data during updates.
+
 ---
 
 # 27. Milestone M20 — Final QA and Documentation
@@ -2103,15 +2105,16 @@ When implementing this repository:
 
 # 46. Current Next Task
 
-M0-M18 have been implemented. The approved architecture supersedes M10-M14.
+M0-M19 have been implemented. The approved architecture supersedes M10-M14.
 
-The next implementation checkpoint is M19 only:
+The next implementation checkpoint is M20 only:
 
 ```text
-1. Complete the manifest and service worker.
-2. Cache the application shell, CSS, JavaScript, schemas, icons, and AFCD catalogue.
-3. Verify all Version 1 tracking, import, progress, and backup features after the first successful load without a network connection.
-4. Add offline update and recovery tests, then run the complete test suite.
+1. Run the complete automated suite and manually verify all Version 1 workflows.
+2. Test widths of 320, 375, 430, and 768 pixels plus desktop.
+3. Test Chrome desktop, Safari desktop where available, Chrome Android, and Safari on iPhone/iPad where available.
+4. Verify AFCD attribution, upgrades, imports, atomic recipe rollback, backup/restore, GitHub Pages deployment, and offline operation.
+5. Complete README setup, architecture, data-source, authoring, licence, and troubleshooting documentation.
 ```
 
-Do not begin M20 final QA until the M19 offline checkpoint has been reviewed.
+Version 1 is complete after the M20 checkpoint has been reviewed.

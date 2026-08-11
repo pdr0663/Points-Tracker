@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:afcd": "node tools/build-afcd-catalogue.js",
+    "build:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-pwa-icons.ps1",
     "test": "node --test"
   },
   "engines": {

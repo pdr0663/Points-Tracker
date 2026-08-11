@@ -44,6 +44,11 @@ import {
 import { createRouter } from "./router.js";
 import { JsonImportError, MAX_IMPORT_BYTES, parseImportText } from "./json-import.js";
 import {
+  importReferenceFood,
+  loadReferenceCatalogue,
+  searchReferenceFoods
+} from "./reference-foods.js";
+import {
   addWeighIn,
   createUserWithInitialWeighIn,
   getCurrentUser,
@@ -65,6 +70,7 @@ let editingFoodId;
 let foodSearchQuery = "";
 let pendingDeleteFoodId;
 let foodNotice;
+let referenceFoodPreview;
 let selectedDiaryDate = localDateString();
 let showingDiaryForm = false;
 let editingDiaryEntryId;
@@ -820,6 +826,7 @@ function foodInputFromForm(form) {
       fat: numberValue(values, "fat"),
       fibre: numberValue(values, "fibre")
     },
+    isZeroPoint: values.get("isZeroPoint") === "on",
     servings: servingRows.map((row) => ({
       id: row.dataset.servingId,
       description: row.querySelector("[data-serving-description]").value,
@@ -841,6 +848,11 @@ function createFoodForm(food) {
     createField({ label: "Carbohydrate /100 g", name: "carbohydrate", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.carbohydrate ?? "" }),
     createField({ label: "Fat /100 g", name: "fat", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.fat ?? "" }),
     createField({ label: "Fibre /100 g", name: "fibre", type: "number", min: "0", step: "0.1", value: food?.nutritionPer100g?.fibre ?? "" })
+  );
+  const zeroPointLabel = createElement("label", { className: "checkbox-field" });
+  zeroPointLabel.append(
+    createElement("input", { attributes: { type: "checkbox", name: "isZeroPoint", checked: food?.isZeroPoint ? "" : undefined } }),
+    createElement("span", { text: "Treat this food as zero-point" })
   );
 
   const servingSection = createElement("fieldset", { className: "serving-editor" });
@@ -884,7 +896,7 @@ function createFoodForm(food) {
   });
   actions.append(submit, cancel);
 
-  form.append(fields, servingSection, calculation, message, actions);
+  form.append(fields, zeroPointLabel, servingSection, calculation, message, actions);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     submit.disabled = true;
@@ -912,7 +924,7 @@ function createFoodSearch() {
   const form = createElement("form", { className: "food-search", attributes: { role: "search" } });
   const label = createElement("label", { className: "visually-hidden", text: "Search foods", attributes: { for: "food-search" } });
   const input = createElement("input", {
-    attributes: { id: "food-search", name: "query", type: "search", value: foodSearchQuery, placeholder: "Search name or brand" }
+    attributes: { id: "food-search", name: "query", type: "search", value: foodSearchQuery, placeholder: "Search saved foods and AFCD" }
   });
   const submit = createElement("button", { className: "button button--primary", text: "Search", attributes: { type: "submit" } });
   form.append(label, input, submit);
@@ -920,6 +932,7 @@ function createFoodSearch() {
     const clear = createElement("button", { className: "button button--secondary", text: "Clear", attributes: { type: "button" } });
     clear.addEventListener("click", () => {
       foodSearchQuery = "";
+      referenceFoodPreview = undefined;
       void renderCurrentRoute();
     });
     form.append(clear);
@@ -927,6 +940,7 @@ function createFoodSearch() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     foodSearchQuery = input.value;
+    referenceFoodPreview = undefined;
     void renderCurrentRoute();
   });
   return form;
@@ -940,6 +954,8 @@ function createFoodCard(food) {
   if (food.brand) identity.append(createElement("p", { className: "food-brand", text: food.brand }));
   if (["ai-estimate", "ai-text", "nutrition-label"].includes(food.source)) {
     identity.append(createElement("span", { className: "food-source-badge", text: "Imported nutrition" }));
+  } else if (food.source?.kind === "afcd") {
+    identity.append(createElement("span", { className: "food-source-badge", text: food.source.referenceRelease }));
   }
   heading.append(identity, createElement("strong", { className: "food-points", text: `${displayPoints(foodPointsPer100g(food))} PP /100 g` }));
 
@@ -996,7 +1012,90 @@ function createFoodCard(food) {
   return card;
 }
 
-function renderFoodsScreen(foods) {
+function createReferenceFoodCard(reference, savedFoods) {
+  const card = createElement("article", { className: "card reference-food-card" });
+  const existing = savedFoods.find((food) => food.source?.kind === "afcd" && food.source.referenceId === reference.id);
+  card.append(
+    createElement("span", { className: "food-source-badge", text: existing ? "AFCD · already saved" : "AFCD reference" }),
+    createElement("h3", { text: reference.name }),
+    createElement("p", { className: "food-brand", text: reference.description }),
+    createElement("p", { text: `Classification ${reference.classification} · ${reference.id}` })
+  );
+  const review = createElement("button", { className: "button button--secondary", text: existing ? "Review saved food" : "Review and import", attributes: { type: "button" } });
+  review.addEventListener("click", () => {
+    if (existing) {
+      showingFoodForm = true;
+      editingFoodId = existing.id;
+    } else referenceFoodPreview = reference;
+    void renderCurrentRoute();
+  });
+  card.append(review);
+  return card;
+}
+
+function createReferenceFoodPreview(reference, catalogue) {
+  const card = createElement("section", { className: "card form-card reference-preview" });
+  const nutrition = reference.nutritionPer100g;
+  card.append(
+    createElement("span", { className: "food-source-badge", text: catalogue.release }),
+    createElement("h3", { text: reference.name }),
+    createElement("p", { text: reference.description }),
+    createElement("p", { text: `AFCD ID ${reference.id} · classification ${reference.classification}` }),
+    createElement("p", { text: `Per 100 g: protein ${nutrition.protein} g · carbohydrate ${nutrition.carbohydrate} g · fat ${nutrition.fat} g · fibre ${nutrition.fibre} g` })
+  );
+  const zeroPointLabel = createElement("label", { className: "checkbox-field reference-zero-point" });
+  const zeroPoint = createElement("input", { attributes: { type: "checkbox", checked: reference.zeroPointCandidate ? "" : undefined } });
+  zeroPointLabel.append(
+    zeroPoint,
+    createElement("span", { text: reference.zeroPointCandidate ? "Treat as zero-point fruit (catalogue candidate — review before importing)" : "Treat as zero-point (off by default)" })
+  );
+  const points = createElement("p", { className: "food-calculation", attributes: { role: "status", "aria-live": "polite" } });
+  function updatePoints() {
+    points.textContent = `${displayPoints(foodPointsPer100g({ nutritionPer100g: nutrition, isZeroPoint: zeroPoint.checked }))} PP per 100 g`;
+  }
+  zeroPoint.addEventListener("change", updatePoints);
+  updatePoints();
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const confirm = createElement("button", { className: "button button--primary", text: "Confirm import", attributes: { type: "button" } });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", () => {
+    referenceFoodPreview = undefined;
+    void renderCurrentRoute();
+  });
+  confirm.addEventListener("click", async () => {
+    confirm.disabled = true;
+    showFormMessage(message, "Importing AFCD food…", "progress");
+    try {
+      const result = await importReferenceFood(reference, catalogue, { isZeroPoint: zeroPoint.checked });
+      referenceFoodPreview = undefined;
+      foodNotice = result.created ? `${result.food.name} imported from ${catalogue.release}.` : `${result.food.name} was already saved and has been reused.`;
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not import AFCD food", error);
+      showFormMessage(message, error.message);
+      confirm.disabled = false;
+    }
+  });
+  actions.append(confirm, cancel);
+  card.append(zeroPointLabel, points, message, actions);
+  return card;
+}
+
+function createAfcdAttribution(catalogue) {
+  const notice = createElement("aside", { className: "afcd-attribution" });
+  notice.append(
+    createElement("strong", { text: catalogue.attribution }),
+    document.createTextNode(` ${catalogue.limitation} `),
+    createElement("a", { text: "Source", attributes: { href: catalogue.sourceUrl, target: "_blank", rel: "noreferrer" } }),
+    document.createTextNode(" · "),
+    createElement("a", { text: "Licence", attributes: { href: catalogue.licenceUrl, target: "_blank", rel: "noreferrer" } })
+  );
+  return notice;
+}
+
+function renderFoodsScreen(foods, referenceFoods, catalogue, referenceError) {
   const screen = createElement("section", { className: "screen" });
   const header = createScreenHeader("Foods", "Shared household foods, nutrition and named serving sizes.");
   const headerActions = createElement("div", { className: "screen-header__actions" });
@@ -1004,6 +1103,7 @@ function renderFoodsScreen(foods) {
   addFood.addEventListener("click", () => {
     jsonImportWorkflow = undefined;
     showingFoodForm = true;
+    referenceFoodPreview = undefined;
     editingFoodId = undefined;
     pendingDeleteFoodId = undefined;
     void renderCurrentRoute();
@@ -1030,12 +1130,19 @@ function renderFoodsScreen(foods) {
     return screen;
   }
 
+  if (referenceFoodPreview && catalogue) {
+    screen.append(createReferenceFoodPreview(referenceFoodPreview, catalogue));
+    return screen;
+  }
+
   if (jsonImportWorkflow?.expectedType === "food-import") {
     screen.append(createJsonImportCard(jsonImportWorkflow));
     return screen;
   }
 
   screen.append(createFoodSearch());
+  if (referenceError) screen.append(createElement("p", { className: "form-message", text: referenceError.message, attributes: { role: "alert" } }));
+  if (foodSearchQuery) screen.append(createElement("h3", { className: "result-heading", text: "Saved foods" }));
   const list = createElement("div", { className: "food-list" });
   if (!foods.length) {
     list.append(createElement("article", {
@@ -1046,6 +1153,13 @@ function renderFoodsScreen(foods) {
     foods.forEach((food) => list.append(createFoodCard(food)));
   }
   screen.append(list);
+  if (foodSearchQuery && catalogue) {
+    screen.append(createElement("h3", { className: "result-heading", text: `${catalogue.release} reference foods` }));
+    const references = createElement("div", { className: "food-list reference-food-list" });
+    if (!referenceFoods.length) references.append(createElement("article", { className: "card empty-state", text: "No AFCD foods match this search." }));
+    else referenceFoods.forEach((reference) => references.append(createReferenceFoodCard(reference, foods)));
+    screen.append(references, createAfcdAttribution(catalogue));
+  }
   return screen;
 }
 
@@ -2127,9 +2241,15 @@ async function renderScreen(route) {
   } else if (route.name === "settings") {
     screen = renderSettingsScreen(state);
   } else if (route.name === "foods") {
-    const foods = await searchFoods(jsonImportWorkflow?.expectedType === "food-import" ? "" : foodSearchQuery);
+    const [foods, catalogueResult] = await Promise.all([
+      searchFoods(jsonImportWorkflow?.expectedType === "food-import" ? "" : foodSearchQuery),
+      loadReferenceCatalogue().then((catalogue) => ({ catalogue }), (error) => ({ error }))
+    ]);
     if (sequence !== renderSequence) return;
-    screen = renderFoodsScreen(foods);
+    const referenceFoods = catalogueResult.catalogue && foodSearchQuery
+      ? searchReferenceFoods(catalogueResult.catalogue, foodSearchQuery)
+      : [];
+    screen = renderFoodsScreen(foods, referenceFoods, catalogueResult.catalogue, catalogueResult.error);
   } else if (route.name === "recipes") {
     const [recipes, foods] = await Promise.all([
       searchRecipes(recipeSearchQuery),
@@ -2179,6 +2299,7 @@ async function startApplication() {
     pendingRecipeDiaryId = undefined;
     pendingDeleteDiaryEntryId = undefined;
     jsonImportWorkflow = undefined;
+    referenceFoodPreview = undefined;
     await renderCurrentRoute();
   });
   addProfileButton.addEventListener("click", () => {

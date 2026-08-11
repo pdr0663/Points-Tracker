@@ -4,6 +4,8 @@ import "fake-indexeddb/auto";
 
 import {
   add,
+  DATABASE_NAME,
+  DATABASE_VERSION,
   get,
   getAll,
   openDatabase,
@@ -59,6 +61,36 @@ test("IndexedDB migration creates the complete initial schema", async () => {
     "users",
     "weighIns"
   ]);
+  assert.equal(DATABASE_VERSION, 2);
+  const transaction = database.transaction("foods", "readonly");
+  assert.ok(transaction.objectStore("foods").indexNames.contains("sourceReference"));
+});
+
+test("version 2 adds the AFCD source index without removing existing foods", async () => {
+  await resetDatabase();
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, 1);
+    request.addEventListener("upgradeneeded", () => {
+      const database = request.result;
+      const foods = database.createObjectStore("foods", { keyPath: "id" });
+      foods.createIndex("normalizedName", "normalizedName");
+      for (const storeName of ["users", "weighIns", "foodAliases", "recipes", "diaryEntries"]) {
+        database.createObjectStore(storeName, { keyPath: "id" });
+      }
+      database.createObjectStore("settings", { keyPath: "key" });
+      request.transaction.objectStore("foods").add({ id: "food-existing", name: "Existing food" });
+    });
+    request.addEventListener("success", () => {
+      request.result.close();
+      resolve();
+    });
+    request.addEventListener("error", () => reject(request.error));
+  });
+  const database = await openDatabase();
+  assert.ok(database.transaction("foods").objectStore("foods").indexNames.contains("sourceReference"));
+  assert.equal((await get("foods", "food-existing")).name, "Existing food");
+  await resetDatabase();
+  await openDatabase();
 });
 
 test("IndexedDB wrapper supports CRUD, index lookup, and repeat access", async () => {

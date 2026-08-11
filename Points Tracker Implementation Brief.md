@@ -351,7 +351,7 @@ points-tracker
 Currently implemented schema version:
 
 ```text
-1
+2
 ```
 
 Object stores:
@@ -2101,19 +2101,18 @@ When implementing this repository:
 
 # 46. Current Next Task
 
-M0-M14 have been implemented. The approved architecture now supersedes M10-M14.
+M0-M16 have been implemented. The approved architecture supersedes M10-M14.
 
-The next implementation checkpoint is M15 only:
+The next implementation checkpoint is M17 only:
 
 ```text
-1. Remove all integrated AI, voice, and label-scanning UI.
-2. Remove the browser AI client and Node/OpenAI backend.
-3. Remove API-key and backend configuration.
-4. Preserve existing application data and all non-AI behaviour.
-5. Add the shared JSON paste, parse, validate, and preview foundation.
-6. Add initial Version 1 schema files, authoring instructions, and examples.
-7. Replace AI-specific tests with importer-foundation tests.
-8. Update README and run the complete test suite.
+1. Enable Version 1 `food-import` confirmation.
+2. Resolve AFCD references from the bundled catalogue and ignore pasted nutrition for them.
+3. Create or explicitly reuse one ordinary shared food after review.
+4. Keep pasted input available when validation or resolution fails.
+5. Preserve the M15 non-writing behaviour for recipe bundles until M18.
+6. Add food-import confirmation, cancellation, duplicate, and unknown-AFCD tests.
+7. Update README and run the complete test suite.
 ```
 
-Do not begin AFCD catalogue integration until M15 tests pass and the removal/import-foundation checkpoint has been reviewed.
+Do not begin recipe-bundle database writes until M17 tests pass and the food-import checkpoint has been reviewed.

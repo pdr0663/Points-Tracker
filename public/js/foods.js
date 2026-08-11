@@ -1,4 +1,4 @@
-import { add, get, getAll, put, runTransaction } from "./db.js";
+import { add, get, getAll, put, queryIndex, runTransaction } from "./db.js";
 import { calculateRawPoints } from "./points.js";
 
 function requestResult(request) {
@@ -31,6 +31,28 @@ function requireNumber(value, name, { exclusiveMinimum = false } = {}) {
     throw new RangeError(`${name} must be ${exclusiveMinimum ? "greater than zero" : "at least zero"}.`);
   }
   return value;
+}
+
+function requireBoolean(value, name) {
+  if (typeof value !== "boolean") throw new TypeError(`${name} must be true or false.`);
+  return value;
+}
+
+function normalizeSource(source) {
+  if (typeof source === "string") return source;
+  if (source === undefined || source === null) {
+    return { kind: "manual", referenceId: null, referenceRelease: null };
+  }
+  if (typeof source !== "object" || Array.isArray(source)) throw new TypeError("source must be an object.");
+  if (!["manual", "afcd", "external-json"].includes(source.kind)) throw new RangeError("source kind is not supported.");
+  if (source.kind === "afcd") {
+    return {
+      kind: "afcd",
+      referenceId: requireText(source.referenceId, "AFCD reference ID"),
+      referenceRelease: requireText(source.referenceRelease, "AFCD reference release")
+    };
+  }
+  return { kind: source.kind, referenceId: null, referenceRelease: null };
 }
 
 export function normalizeFoodName(name) {
@@ -89,12 +111,13 @@ function validateFood(input, servingIdFactory) {
     brand,
     normalizedBrand: normalizeFoodName(brand),
     nutritionPer100g,
+    isZeroPoint: requireBoolean(input.isZeroPoint ?? false, "isZeroPoint"),
     ...servingData
   };
 }
 
 export function foodPointsPer100g(food) {
-  return calculateRawPoints(food.nutritionPer100g);
+  return calculateRawPoints({ ...food.nutritionPer100g, isZeroPoint: food.isZeroPoint ?? false });
 }
 
 export function foodPointsForGrams(food, grams) {
@@ -113,7 +136,7 @@ export async function createFood(input, options = {}) {
     id: options.foodId ?? createId("food"),
     type: "food",
     ...validated,
-    source: optionalText(input.source) || "nutrition-label",
+    source: normalizeSource(input.source),
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -133,7 +156,7 @@ export async function updateFood(foodId, input, options = {}) {
   const food = {
     ...existing,
     ...validated,
-    source: optionalText(input.source) || existing.source || "nutrition-label",
+    source: input.source === undefined ? existing.source : normalizeSource(input.source),
     updatedAt: options.timestamp ?? new Date().toISOString()
   };
 
@@ -165,6 +188,12 @@ export async function searchFoods(query) {
     (food.normalizedName ?? normalizeFoodName(food.name)).includes(normalizedQuery)
     || (food.normalizedBrand ?? normalizeFoodName(food.brand)).includes(normalizedQuery)
   );
+}
+
+export async function findFoodBySource(kind, referenceId) {
+  if (typeof kind !== "string" || typeof referenceId !== "string") return undefined;
+  const matches = await queryIndex("foods", "sourceReference", [kind, referenceId]);
+  return matches[0];
 }
 
 function recipeReferencesFood(recipe, foodId) {

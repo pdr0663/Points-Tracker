@@ -1,5 +1,5 @@
 export const DATABASE_NAME = "points-tracker";
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 const LEGACY_DATABASE_NAME = ["pro", "points"].join("");
 const STORE_NAMES = ["users", "weighIns", "foods", "foodAliases", "recipes", "diaryEntries", "settings"];
 
@@ -30,6 +30,12 @@ const migrations = {
     diaryEntries.createIndex("itemId", "itemId", { unique: false });
 
     database.createObjectStore("settings", { keyPath: "key" });
+  },
+  2(database, transaction) {
+    const foods = transaction.objectStore("foods");
+    if (!foods.indexNames.contains("sourceReference")) {
+      foods.createIndex("sourceReference", ["source.kind", "source.referenceId"], { unique: false });
+    }
   }
 };
 

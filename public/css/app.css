@@ -533,6 +533,59 @@ textarea:focus-visible,
   border-radius: 999px;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0.8rem 0;
+  font-weight: 700;
+}
+
+.checkbox-field input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  accent-color: var(--accent);
+}
+
+.result-heading {
+  margin: 1.25rem 0 0.65rem;
+}
+
+.reference-food-card {
+  border-left: 4px solid var(--accent);
+}
+
+.reference-food-card h3 {
+  margin-bottom: 0.35rem;
+}
+
+.reference-preview {
+  border-top: 4px solid var(--accent);
+}
+
+.reference-zero-point {
+  padding: 0.8rem;
+  background: var(--surface-highlight);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.afcd-attribution {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.afcd-attribution a {
+  color: var(--accent-strong);
+}
+
 .food-search {
   display: flex;
   flex-wrap: wrap;

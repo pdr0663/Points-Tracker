@@ -78,3 +78,15 @@ The transformation and column selection were performed for Points Tracker. They 
 Upload this notes file and the CSV alongside `ChatGPT JSON Authoring Guide.md`.
 
 For an AFCD match, ChatGPT should use the exact `public_food_key`, `food_name`, and preparation description. If multiple records are plausible, it should ask the user to choose. It must not label remembered or web-searched nutrition as AFCD data.
+
+## Points Tracker catalogue generation
+
+The same checked-in CSV is the reproducible source for the static application catalogue. Run:
+
+```powershell
+npm run build:afcd
+```
+
+`tools/build-afcd-catalogue.js` validates the input shape, identifiers, classification codes, nutrient values, duplicate IDs, and expected record count before writing `public/data/afcd-reference.json`. The generated metadata records the source filename and SHA-256 so source drift is detectable.
+
+Fresh/raw fruit classifications are marked only as zero-point candidates. Canned, dried, dehydrated, preserved, salted, syrup, sweetened, juice, chip, paste, and stewed descriptions are excluded. The application always presents the resulting checkbox for user review before copying an AFCD food into the saved-food database.

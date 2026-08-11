@@ -25,6 +25,7 @@ import {
   foodPointsForDefaultServing,
   foodPointsForGrams,
   foodPointsPer100g,
+  listFoodAliases,
   normalizeFoodName,
   searchFoods,
   updateFood
@@ -42,6 +43,13 @@ import {
   searchRecipes,
   updateRecipe
 } from "./recipes.js";
+import {
+  canConfirmRecipeImport,
+  confirmRecipeImport,
+  previewRecipeImport,
+  resolveRecipeImport,
+  selectRecipeImportResolution
+} from "./recipe-import.js";
 import { createRouter } from "./router.js";
 import { JsonImportError, MAX_IMPORT_BYTES, parseImportText } from "./json-import.js";
 import {
@@ -609,29 +617,131 @@ function importTypeLabel(type) {
   return type === "food-import" ? "food" : "recipe";
 }
 
-function createImportFoodPreview(food) {
+function recipeImportStatus(entry) {
+  if (entry.status === "reuse") return `Reuse saved food · ${entry.reason}`;
+  if (entry.status === "create") return entry.candidate.source.kind === "afcd"
+    ? `Import AFCD food · ${entry.candidate.source.referenceId}`
+    : "Create new shared food";
+  if (entry.status === "bundle-reuse") return `Reuse bundled food · ${entry.targetImportKey}`;
+  if (entry.selection?.action === "reuse") return `Selected saved food · ${entry.selection.food.name}`;
+  if (entry.selection?.action === "create") return "Confirmed as a new shared food";
+  return `Needs confirmation · ${entry.reason}`;
+}
+
+function createRecipeImportResolution(entry, workflow) {
   const item = createElement("article", { className: "import-preview__food" });
-  const heading = createElement("h4", { text: food.name });
-  if (food.brand) heading.append(createElement("span", { className: "import-preview__brand", text: ` · ${food.brand}` }));
+  const displayFood = entry.status === "reuse" ? entry.food : entry.candidate;
   item.append(
-    heading,
-    createElement("p", {
-      className: "import-preview__source",
-      text: food.source.kind === "afcd" ? `AFCD reference · ${food.source.foodId}` : "External JSON nutrition"
-    })
+    createElement("h4", { text: `${entry.importKey} · ${entry.imported.name}` }),
+    createElement("p", { className: "import-preview__source", text: recipeImportStatus(entry) })
   );
-  if (food.nutritionPer100g) {
-    const nutrition = food.nutritionPer100g;
+  if (displayFood?.brand) item.append(createElement("p", { text: `Brand: ${displayFood.brand}` }));
+  if (displayFood?.nutritionPer100g) {
+    const nutrition = displayFood.nutritionPer100g;
     item.append(createElement("p", {
       text: `Per 100 g: protein ${nutrition.protein} g · carbohydrate ${nutrition.carbohydrate} g · fat ${nutrition.fat} g · fibre ${nutrition.fibre} g`
     }));
   }
-  if (food.servings.length) {
-    item.append(createElement("p", {
-      text: `Servings: ${food.servings.map((serving) => `${serving.description} (${serving.grams} g)`).join(", ")}`
-    }));
+
+  if (entry.status === "ambiguous") {
+    const label = createElement("label", { className: "form-field" });
+    label.append(createElement("span", { text: "Resolve match" }));
+    const select = createElement("select", { attributes: { "aria-label": `Resolve ${entry.importKey}` } });
+    select.append(createElement("option", { text: "Choose a resolution", attributes: { value: "" } }));
+    select.append(createElement("option", { text: `Create new: ${entry.candidate.name}`, attributes: { value: "create" } }));
+    entry.matches.forEach((food) => select.append(createElement("option", {
+      text: `Reuse: ${food.name}${food.brand ? ` · ${food.brand}` : ""}`,
+      attributes: { value: `reuse:${food.id}` }
+    })));
+    select.value = entry.selection?.action === "create" ? "create" : entry.selection?.food ? `reuse:${entry.selection.food.id}` : "";
+    select.addEventListener("change", () => {
+      entry.selection = undefined;
+      if (select.value === "create") selectRecipeImportResolution(workflow.resolution, entry.importKey, { action: "create" });
+      else if (select.value.startsWith("reuse:")) {
+        selectRecipeImportResolution(workflow.resolution, entry.importKey, { action: "reuse", foodId: select.value.slice(6) });
+      }
+      void renderCurrentRoute();
+    });
+    label.append(select);
+    item.append(label);
+  }
+
+  const createsFood = entry.status === "create" || entry.selection?.action === "create";
+  if (createsFood) {
+    const zeroLabel = createElement("label", { className: "checkbox-field" });
+    const zeroPoint = createElement("input", { attributes: { type: "checkbox", checked: entry.candidate.isZeroPoint ? "" : undefined } });
+    zeroPoint.addEventListener("change", () => {
+      entry.candidate.isZeroPoint = zeroPoint.checked;
+      void renderCurrentRoute();
+    });
+    zeroLabel.append(zeroPoint, createElement("span", { text: "Treat proposed food as zero-point" }));
+    item.append(zeroLabel);
   }
   return item;
+}
+
+function createRecipeImportReviewCard(workflow) {
+  const document = workflow.resolution.document;
+  const card = createElement("section", { className: "card form-card json-import-card" });
+  card.append(
+    createElement("h3", { text: `Review recipe import · ${document.recipe.name}` }),
+    createElement("p", { className: "notice", text: "No data has been changed. Review every reuse, new food, AFCD source, conflict, and zero-point choice before confirming." })
+  );
+  const overview = createElement("dl", { className: "import-preview__overview" });
+  [["Recipe servings", document.recipe.servings], ["Bundled foods", workflow.resolution.entries.length], ["Ingredients", document.recipe.ingredients.length]]
+    .forEach(([term, value]) => overview.append(createElement("dt", { text: term }), createElement("dd", { text: String(value) })));
+  card.append(overview, createElement("h4", { text: "Food resolution" }));
+  const foodList = createElement("div", { className: "import-preview__foods" });
+  workflow.resolution.entries.forEach((entry) => foodList.append(createRecipeImportResolution(entry, workflow)));
+  card.append(foodList);
+
+  const ingredients = createElement("ul", { className: "import-preview__ingredients" });
+  document.recipe.ingredients.forEach((ingredient) => ingredients.append(createElement("li", {
+    text: `${ingredient.foodImportKey}: ${ingredient.quantity} ${ingredient.unit}`
+  })));
+  card.append(createElement("h4", { text: "Recipe ingredients" }), ingredients);
+
+  const calculation = createElement("p", { className: "food-calculation", attributes: { role: "status", "aria-live": "polite" } });
+  try {
+    const preview = previewRecipeImport(workflow.resolution);
+    calculation.textContent = preview
+      ? `${displayPoints(preview.rawTotalPoints)} PP total · ${displayPoints(preview.rawPointsPerServing)} PP per serving`
+      : "Resolve every possible match to calculate and confirm this recipe.";
+  } catch {
+    calculation.textContent = "Resolve every valid food and serving before confirming this recipe.";
+  }
+
+  const message = createFormMessage();
+  const actions = createElement("div", { className: "form-actions" });
+  const confirm = createElement("button", {
+    className: "button button--primary",
+    text: "Confirm recipe bundle",
+    attributes: { type: "button", disabled: canConfirmRecipeImport(workflow.resolution) ? undefined : "" }
+  });
+  confirm.addEventListener("click", async () => {
+    confirm.disabled = true;
+    showFormMessage(message, "Importing foods and recipe…", "progress");
+    try {
+      const result = await confirmRecipeImport(workflow.resolution, { savedFoods: workflow.savedFoods });
+      jsonImportWorkflow = undefined;
+      recipeNotice = `${result.recipe.name} imported with ${result.foodsCreated.length} new and ${result.foodsReused.length} reused food${result.foodsReused.length === 1 ? "" : "s"}.`;
+      await renderCurrentRoute();
+    } catch (error) {
+      console.error("Could not import recipe bundle", error);
+      showFormMessage(message, error.message);
+      confirm.disabled = !canConfirmRecipeImport(workflow.resolution);
+    }
+  });
+  const edit = createElement("button", { className: "button button--secondary", text: "Edit JSON", attributes: { type: "button" } });
+  edit.addEventListener("click", () => {
+    workflow.stage = "paste";
+    void renderCurrentRoute();
+  });
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", cancelJsonImport);
+  actions.append(confirm, edit, cancel);
+  card.append(calculation, message, actions);
+  return card;
 }
 
 function createJsonImportCard(workflow, context = {}) {
@@ -639,6 +749,7 @@ function createJsonImportCard(workflow, context = {}) {
   if (workflow.stage === "food-review") {
     return createFoodForm(workflow.resolution.candidate, { importWorkflow: workflow });
   }
+  if (workflow.stage === "recipe-review") return createRecipeImportReviewCard(workflow);
   const card = createElement("section", { className: "card form-card json-import-card" });
 
   if (workflow.stage === "paste") {
@@ -693,7 +804,13 @@ function createJsonImportCard(workflow, context = {}) {
           workflow.resolution = resolveFoodImport(workflow.parsed.document, context.catalogue, context.foods);
           workflow.stage = "food-review";
         } else {
-          workflow.stage = "preview";
+          workflow.resolution = resolveRecipeImport(workflow.parsed.document, {
+            savedFoods: context.foods,
+            aliases: context.aliases,
+            catalogue: context.catalogue
+          });
+          workflow.savedFoods = context.foods;
+          workflow.stage = "recipe-review";
         }
         workflow.error = undefined;
       } catch (error) {
@@ -709,60 +826,7 @@ function createJsonImportCard(workflow, context = {}) {
     return card;
   }
 
-  const document = workflow.parsed.document;
-  card.append(
-    createElement("h3", { text: `Review ${label} import` }),
-    createElement("p", { className: "notice", text: "Valid Version 1 document. No application data has been changed." })
-  );
-  const overview = createElement("dl", { className: "import-preview__overview" });
-  const rows = [["Document type", document.type], ["Schema version", document.schemaVersion]];
-  if (document.type === "food-import") rows.push(["Food", document.food.name]);
-  else rows.push(
-    ["Recipe", document.recipe.name],
-    ["Recipe servings", document.recipe.servings],
-    ["Bundled foods", document.foods.length],
-    ["Ingredients", document.recipe.ingredients.length]
-  );
-  rows.forEach(([term, value]) => overview.append(createElement("dt", { text: term }), createElement("dd", { text: String(value) })));
-  card.append(overview);
-
-  const foods = document.type === "food-import" ? [document.food] : document.foods;
-  const foodList = createElement("div", { className: "import-preview__foods" });
-  foods.forEach((food) => foodList.append(createImportFoodPreview(food)));
-  card.append(createElement("h4", { text: document.type === "food-import" ? "Food definition" : "Food definitions" }), foodList);
-
-  if (document.type === "recipe-import") {
-    const ingredientList = createElement("ul", { className: "import-preview__ingredients" });
-    document.recipe.ingredients.forEach((ingredient) => ingredientList.append(createElement("li", {
-      text: `${ingredient.foodImportKey}: ${ingredient.quantity} ${ingredient.unit}`
-    })));
-    card.append(createElement("h4", { text: "Recipe ingredients" }), ingredientList);
-  }
-
-  const afcdCount = foods.filter((food) => food.source.kind === "afcd").length;
-  card.append(createElement("p", {
-    className: "import-foundation-notice",
-    text: afcdCount
-      ? `${afcdCount} AFCD ${afcdCount === 1 ? "reference requires" : "references require"} catalogue resolution. Recipe bundles remain validation and review only until M18.`
-      : "Recipe bundles remain validation and review only. Confirmation and database creation will be enabled in M18."
-  }));
-
-  const actions = createElement("div", { className: "form-actions" });
-  const edit = createElement("button", { className: "button button--secondary", text: "Edit", attributes: { type: "button" } });
-  edit.addEventListener("click", () => {
-    workflow.stage = "paste";
-    void renderCurrentRoute();
-  });
-  const confirm = createElement("button", {
-    className: "button button--primary",
-    text: "Confirm",
-    attributes: { type: "button", disabled: "", title: "Recipe saving is introduced in M18." }
-  });
-  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
-  cancel.addEventListener("click", cancelJsonImport);
-  actions.append(edit, confirm, cancel);
-  card.append(actions);
-  return card;
+  throw new Error(`Unsupported JSON import workflow stage: ${workflow.stage}.`);
 }
 
 function createServingRow(serving = {}, isDefault = false) {
@@ -1505,7 +1569,7 @@ function createRecipeSearch() {
   return form;
 }
 
-function renderRecipesScreen(recipes, foods) {
+function renderRecipesScreen(recipes, foods, aliases, catalogue, catalogueError) {
   const screen = createElement("section", { className: "screen" });
   const header = createScreenHeader("Recipes", "Build reusable recipes from foods in the shared household database.");
   const headerActions = createElement("div", { className: "screen-header__actions" });
@@ -1540,7 +1604,8 @@ function renderRecipesScreen(recipes, foods) {
     return screen;
   }
   if (jsonImportWorkflow?.expectedType === "recipe-import") {
-    screen.append(createJsonImportCard(jsonImportWorkflow));
+    screen.append(createJsonImportCard(jsonImportWorkflow, { foods, aliases, catalogue }));
+    if (catalogueError) screen.append(createElement("p", { className: "form-message", text: catalogueError.message, attributes: { role: "alert" } }));
     return screen;
   }
   screen.append(createRecipeSearch());
@@ -2314,12 +2379,14 @@ async function renderScreen(route) {
       : [];
     screen = renderFoodsScreen(foods, referenceFoods, catalogueResult.catalogue, catalogueResult.error);
   } else if (route.name === "recipes") {
-    const [recipes, foods] = await Promise.all([
+    const [recipes, foods, aliases, catalogueResult] = await Promise.all([
       searchRecipes(recipeSearchQuery),
-      searchFoods("")
+      searchFoods(""),
+      listFoodAliases(),
+      loadReferenceCatalogue().then((catalogue) => ({ catalogue }), (error) => ({ error }))
     ]);
     if (sequence !== renderSequence) return;
-    screen = renderRecipesScreen(recipes, foods);
+    screen = renderRecipesScreen(recipes, foods, aliases, catalogueResult.catalogue, catalogueResult.error);
   } else if (route.name === "progress") {
     if (progressView === "overview") {
       const progress = await getProgressSummary(state.currentUser.id, localDateString());

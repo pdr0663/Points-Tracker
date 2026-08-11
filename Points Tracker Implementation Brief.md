@@ -1557,6 +1557,8 @@ unresolved
 
 Show existing foods to reuse, AFCD foods to import, custom foods to create, and all conflicts. Confirmation must create all missing foods and the recipe in one IndexedDB transaction, then replace import keys with persistent food IDs.
 
+Preserve the AFCD source CSV's byte representation across Windows and Linux checkouts so its documented source SHA-256 passes both local and GitHub Actions verification.
+
 ## Definition of Done
 
 No unresolved ingredient can be confirmed. Cancellation and validation failures write nothing. A forced database failure leaves neither partial food inserts nor a partial recipe.
@@ -2101,18 +2103,15 @@ When implementing this repository:
 
 # 46. Current Next Task
 
-M0-M16 have been implemented. The approved architecture supersedes M10-M14.
+M0-M18 have been implemented. The approved architecture supersedes M10-M14.
 
-The next implementation checkpoint is M17 only:
+The next implementation checkpoint is M19 only:
 
 ```text
-1. Enable Version 1 `food-import` confirmation.
-2. Resolve AFCD references from the bundled catalogue and ignore pasted nutrition for them.
-3. Create or explicitly reuse one ordinary shared food after review.
-4. Keep pasted input available when validation or resolution fails.
-5. Preserve the M15 non-writing behaviour for recipe bundles until M18.
-6. Add food-import confirmation, cancellation, duplicate, and unknown-AFCD tests.
-7. Update README and run the complete test suite.
+1. Complete the manifest and service worker.
+2. Cache the application shell, CSS, JavaScript, schemas, icons, and AFCD catalogue.
+3. Verify all Version 1 tracking, import, progress, and backup features after the first successful load without a network connection.
+4. Add offline update and recovery tests, then run the complete test suite.
 ```
 
-Do not begin recipe-bundle database writes until M17 tests pass and the food-import checkpoint has been reviewed.
+Do not begin M20 final QA until the M19 offline checkpoint has been reviewed.

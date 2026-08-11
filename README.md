@@ -52,7 +52,7 @@ The Foods and Recipes screens contain **Paste food JSON** and **Paste recipe JSO
 
 M17 food imports open in the ordinary editable food form. Review the nutrition, named servings, zero-point choice, and deterministic Points preview, then either confirm creation or explicitly reuse a detected saved food. Cancelling writes nothing. AFCD references are resolved against the bundled catalogue; catalogue nutrition always wins over any pasted nutrition, and unknown identifiers are rejected while the pasted JSON remains available for correction.
 
-Recipe bundles still stop at a non-writing preview. Their transactional confirmation remains reserved for M18.
+M18 recipe bundles resolve each local `importKey` in order against AFCD source IDs, exact saved foods, aliases, exact AFCD references, and possible saved-food matches. The review identifies every reuse, AFCD import, custom creation, and conflict. Possible matches require an explicit create-or-reuse choice. Confirmation creates all missing foods and the recipe in one IndexedDB transaction, replacing every import key with a persistent food ID; cancellation, validation errors, unresolved conflicts, and database failures leave no partial records.
 
 Published schemas and examples are available at:
 
@@ -80,6 +80,8 @@ npm run build:afcd
 
 The build validates the exact eight-column extract, all required nutrients, identifiers, classifications, duplicate IDs, and the expected 1,588-record count. It writes `public/data/afcd-reference.json`, including the source SHA-256, release, attribution, licence URL, limitation notice, normalized search text, and curated zero-point candidate metadata.
 
+The repository attributes preserve the AFCD CSV's CRLF byte representation on every platform so its source SHA-256 is identical in Windows development and Linux GitHub Actions checkouts.
+
 The Foods search shows saved foods first and AFCD reference foods second. Reviewing a reference shows its official nutrition and locally calculated Points. Confirmation copies a 100 g snapshot into the ordinary food database. The structured AFCD source ID and release prevent repeat imports from creating duplicates.
 
 AFCD material is sourced from Food Standards Australia New Zealand. Retain its attribution, licence information, Australian-data notice, and limitation statements when redistributing derived data.
@@ -98,6 +100,7 @@ The browser application uses dependency-light ES modules under `public/js`:
 - `backup.js` — portable export, validation, and transactional restore
 - `json-import.js` — pasted JSON normalization, dispatch, and Version 1 validation
 - `food-import.js` — M17 food resolution, duplicate detection, AFCD authority, and confirmation
+- `recipe-import.js` — M18 ordered food resolution, conflict choices, preview, and atomic bundle confirmation
 - `reference-foods.js` — static AFCD loading, validation, search, and copy-on-use
 - `app.js` — screen rendering and workflow coordination
 
@@ -105,4 +108,4 @@ There is no production server directory. GitHub Pages hosts the complete applica
 
 ## Current milestone
 
-M17 enables Version 1 food JSON confirmation through the ordinary food editor, including AFCD catalogue resolution, duplicate reuse, serving and zero-point review, and deterministic Points preview. Recipe-bundle writes remain disabled until M18.
+M18 enables Version 1 recipe-bundle review and atomic confirmation, including saved-food and alias reuse, AFCD resolution, explicit conflict choices, deterministic Points preview, and rollback without partial records. It also makes the AFCD source hash portable across GitHub's Linux runner. M19 offline/PWA completion is next.

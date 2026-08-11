@@ -97,6 +97,7 @@
                 "foodId": { "type": "string", "minLength": 1, "maxLength": 100 }
               }
             },
+            "nutritionPer100g": { "$ref": "#/$defs/nutrition" },
             "servings": { "$ref": "#/$defs/servings" }
           }
         }
@@ -110,7 +111,6 @@
     },
     "name": { "type": "string", "minLength": 1, "maxLength": 160 },
     "brand": { "type": ["string", "null"], "maxLength": 160 },
-    "servings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
+    "servings": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/serving" } }
   }
 }
-

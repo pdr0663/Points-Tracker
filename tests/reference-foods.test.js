@@ -15,6 +15,7 @@ import {
 
 const catalogueText = await readFile(new URL("../public/data/afcd-reference.json", import.meta.url), "utf8");
 const sourceText = await readFile(new URL("../AFCD Release 3 - Points Tracker Nutrients.csv", import.meta.url), "utf8");
+const attributesText = await readFile(new URL("../.gitattributes", import.meta.url), "utf8");
 const catalogue = validateReferenceCatalogue(JSON.parse(catalogueText));
 
 test("generated AFCD Release 3 catalogue matches its checked-in source extract", () => {
@@ -23,6 +24,11 @@ test("generated AFCD Release 3 catalogue matches its checked-in source extract",
   assert.equal(catalogue.foods.length, 1588);
   assert.equal(catalogue.sourceSha256, createHash("sha256").update(sourceText).digest("hex"));
   assert.deepEqual(catalogue.foods.map((food) => food.id), [...catalogue.foods].map((food) => food.id).sort());
+});
+
+test("the AFCD source byte hash is portable across Git checkouts", () => {
+  assert.match(attributesText, /^"AFCD Release 3 - Points Tracker Nutrients\.csv" text eol=crlf\s*$/m);
+  assert.equal(sourceText.includes("\r\n"), true);
 });
 
 test("reference search is deterministic and supports names, descriptions, and identifiers", () => {
@@ -60,4 +66,3 @@ test("AFCD copy-on-use snapshots nutrition and reuses the source identifier", as
   assert.equal(foodPointsPer100g(first.food), 0);
   assert.equal((await findFoodBySource("afcd", "F000262")).id, first.food.id);
 });
-

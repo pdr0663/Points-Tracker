@@ -116,6 +116,20 @@ function validateFood(input, servingIdFactory) {
   };
 }
 
+export function buildFood(input, options = {}) {
+  const servingIdFactory = options.servingIdFactory ?? ((index) => createId(`serving-${index + 1}`));
+  const validated = validateFood(input, servingIdFactory);
+  const timestamp = options.timestamp ?? new Date().toISOString();
+  return {
+    id: options.foodId ?? createId("food"),
+    type: "food",
+    ...validated,
+    source: normalizeSource(input.source),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
 export function foodPointsPer100g(food) {
   return calculateRawPoints({ ...food.nutritionPer100g, isZeroPoint: food.isZeroPoint ?? false });
 }
@@ -129,18 +143,7 @@ export function foodPointsForDefaultServing(food) {
 }
 
 export async function createFood(input, options = {}) {
-  const servingIdFactory = options.servingIdFactory ?? ((index) => createId(`serving-${index + 1}`));
-  const validated = validateFood(input, servingIdFactory);
-  const timestamp = options.timestamp ?? new Date().toISOString();
-  const food = {
-    id: options.foodId ?? createId("food"),
-    type: "food",
-    ...validated,
-    source: normalizeSource(input.source),
-    createdAt: timestamp,
-    updatedAt: timestamp
-  };
-
+  const food = buildFood(input, options);
   await add("foods", food);
   return food;
 }

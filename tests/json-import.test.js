@@ -77,6 +77,14 @@ test("validates recipe keys, references, units, and positive quantities", () => 
   assert.ok(issues.some((item) => item.path.endsWith("unit")));
 });
 
+test("recipe AFCD nutrition is validated but catalogue resolution remains authoritative", () => {
+  const recipe = structuredClone(validRecipe);
+  recipe.foods[0].source = { kind: "afcd", foodId: "F000262" };
+  assert.deepEqual(validateImportDocument(recipe), []);
+  recipe.foods[0].nutritionPer100g.points = 9;
+  assert.ok(validateImportDocument(recipe).some((item) => item.path === "foods[0].nutritionPer100g.points"));
+});
+
 test("accepts syntactically valid AFCD references and validates but does not trust pasted nutrition", () => {
   const afcd = structuredClone(validFood);
   afcd.food.source = { kind: "afcd", foodId: "F000001" };

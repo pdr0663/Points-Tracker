@@ -20,13 +20,18 @@ test("production UI exposes JSON import without integrated AI controls", async (
   assert.doesNotMatch(app, /\.\/ai\.js|\.\/voice\.js|points-tracker-api-base/);
 });
 
-test("food JSON import enables reviewed confirmation while recipe bundles remain non-writing", async () => {
+test("food and recipe JSON imports enable reviewed confirmation", async () => {
   const app = await readFile(new URL("../public/js/app.js", import.meta.url), "utf8");
   assert.match(app, /resolveFoodImport/);
   assert.match(app, /Review imported food/);
   assert.match(app, /Reuse saved food/);
   assert.match(app, /Confirm food/);
-  assert.match(app, /Recipe saving is introduced in M18/);
+  assert.match(app, /resolveRecipeImport/);
+  assert.match(app, /Review recipe import/);
+  assert.match(app, /Confirm recipe bundle/);
+  assert.match(app, /Resolve match/);
+  assert.match(app, /Importing foods and recipe/);
+  assert.doesNotMatch(app, /Recipe saving is introduced in M18/);
 });
 
 test("food UI exposes saved-first AFCD search, review, and import controls", async () => {

@@ -85,12 +85,11 @@ export function recipePointsForServings(recipe, servings) {
   return recipe.rawPointsPerServing * requirePositiveNumber(servings, "servings");
 }
 
-export async function createRecipe(input, options = {}) {
-  const foods = await getAll("foods");
+export function buildRecipe(input, foods, options = {}) {
   const calculation = calculateRecipe(input, foods, options);
   const timestamp = options.timestamp ?? new Date().toISOString();
   const name = requireText(input.name, "name");
-  const recipe = {
+  return {
     id: options.recipeId ?? createId("recipe"),
     type: "recipe",
     name,
@@ -99,6 +98,11 @@ export async function createRecipe(input, options = {}) {
     createdAt: timestamp,
     updatedAt: timestamp
   };
+}
+
+export async function createRecipe(input, options = {}) {
+  const foods = await getAll("foods");
+  const recipe = buildRecipe(input, foods, options);
   await add("recipes", recipe);
   return recipe;
 }

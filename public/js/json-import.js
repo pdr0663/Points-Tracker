@@ -130,7 +130,7 @@ function validateServings(servings, path, issues) {
   });
 }
 
-function validateFood(food, path, issues, { recipeFood = false, allowAfcdNutrition = false } = {}) {
+function validateFood(food, path, issues, { recipeFood = false } = {}) {
   if (!exactKeys(food, recipeFood ? RECIPE_FOOD_KEYS : FOOD_KEYS, path, issues)) return;
   if (recipeFood) {
     requiredString(food.importKey, `${path}.importKey`, issues, 80);
@@ -146,14 +146,13 @@ function validateFood(food, path, issues, { recipeFood = false, allowAfcdNutriti
   if (sourceKind === "external-json") {
     validateNutrition(food.nutritionPer100g, `${path}.nutritionPer100g`, issues);
   } else if (sourceKind === "afcd" && Object.hasOwn(food, "nutritionPer100g")) {
-    if (allowAfcdNutrition) validateNutrition(food.nutritionPer100g, `${path}.nutritionPer100g`, issues);
-    else issues.push(issue(`${path}.nutritionPer100g`, "Recipe AFCD references cannot supply nutrition until M18 resolution is implemented."));
+    validateNutrition(food.nutritionPer100g, `${path}.nutritionPer100g`, issues);
   }
 }
 
 function validateFoodImport(document, issues) {
   exactKeys(document, ROOT_KEYS["food-import"], "$", issues);
-  validateFood(document.food, "food", issues, { allowAfcdNutrition: true });
+  validateFood(document.food, "food", issues);
 }
 
 function validateRecipeImport(document, issues) {

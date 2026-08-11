@@ -5,6 +5,7 @@ import "fake-indexeddb/auto";
 import { resetDatabase } from "../public/js/db.js";
 import {
   createDiaryEntry,
+  createDiaryEntries,
   dailyBudgetForDate,
   deleteDiaryEntry,
   duplicateDiaryEntry,
@@ -114,6 +115,27 @@ test("entries can be edited, duplicated without recalculation, and deleted", asy
   await deleteDiaryEntry(edited.id);
   assert.equal(await getDiaryEntry(edited.id), undefined);
   assert.deepEqual(await listDiaryEntries(user.id, "2026-08-10"), [duplicate]);
+});
+
+test("a confirmed multi-item meal is saved atomically", async () => {
+  await resetDatabase();
+  const { user, food } = await setup();
+  const common = { userId: user.id, date: "2026-08-10", meal: "lunch" };
+  const entries = await createDiaryEntries([
+    { ...common, foodId: food.id, servingId: "serving-100g", quantity: 2 },
+    { ...common, foodId: food.id, grams: 50 }
+  ], {
+    entryIdFactory: (index) => `ai-diary-${index + 1}`,
+    timestamp: "2026-08-10T12:00:00Z"
+  });
+  assert.equal(entries.length, 2);
+  assert.equal((await listDiaryEntries(user.id, "2026-08-10")).length, 2);
+
+  await assert.rejects(createDiaryEntries([
+    { ...common, foodId: food.id, grams: 25 },
+    { ...common, foodId: "missing-food", grams: 25 }
+  ]), /does not exist/u);
+  assert.equal((await listDiaryEntries(user.id, "2026-08-10")).length, 2);
 });
 
 test("daily summaries retain negative remaining points and calculate excess", () => {

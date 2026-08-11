@@ -1,6 +1,6 @@
 # Points Tracker
 
-A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional; M10 provides the server-side boundary, while its browser workflows arrive in M11–M13.
+A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional; M10 provides the server-side boundary and M11 adds reviewed text entry for meals and recipes.
 
 ## Requirements
 
@@ -45,6 +45,14 @@ The M10 server exposes:
 Text requests are limited to 64 KiB, images to 8 MiB, and audio to 20 MiB by default. Model output is requested with strict JSON schemas and then validated again by the server. The schemas exclude Points values; all Points calculations remain in deterministic browser code.
 
 The AI endpoints are deliberately optional. A missing key or an OpenAI failure returns a JSON error and does not affect local tracking. The server does not yet provide user authentication, so do not expose it as a public, chargeable API. Authentication must be added before an internet-accessible deployment.
+
+The browser calls the same origin by default. When the static application and backend are deployed separately, set the public, non-secret backend URL in `public/index.html`:
+
+```html
+<meta name="points-tracker-api-base" content="https://your-backend.example">
+```
+
+This URL is safe to publish; the API key must remain only in the backend environment. The backend's `APP_ORIGIN` must match the static site's exact origin.
 
 ## Appearance
 
@@ -91,8 +99,9 @@ Implemented milestones:
 - M8: goal progress with unclamped numerical and clamped visual percentages, sensible weight milestones, current and completed weigh-in periods, and a responsive SVG weight-history chart
 - M9: complete JSON export, strict import validation and review, explicit replacement confirmation, and transactional all-store restore
 - M10: optional server-side OpenAI boundary, strict structured-output schemas and validation, upload and request limits, health reporting, controlled cross-origin access, and consistent errors
+- M11: text meal and recipe interpretation, exact/alias/conservative probable food matching, editable review, deterministic Points previews, unresolved-item blocking, and explicit atomic confirmation
 
-The browser AI review workflows intentionally remain placeholders until M11–M13.
+Voice input and nutrition-label scanning remain placeholders until M12 and M13.
 
 ## Architecture
 
@@ -114,6 +123,8 @@ OpenAI API
 Normal tracking must continue working if the AI API is unavailable.
 
 `server/schemas.js` defines the structured-output contracts. `server/validation.js` independently validates request data and every model-produced object before it can reach browser code. Audio and image uploads are accepted as bounded raw request bodies, avoiding unnecessary upload middleware.
+
+`public/js/ai.js` owns the browser API client, response revalidation, saved-food matching, unit/serving resolution and deterministic review calculations. AI text is never written directly to the DOM as HTML. Meal confirmation uses one IndexedDB transaction, while recipe confirmation passes through the ordinary recipe engine. Unresolved foods or units prevent confirmation until the user selects a saved food and serving.
 
 ## Data storage
 

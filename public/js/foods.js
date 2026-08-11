@@ -153,6 +153,10 @@ export async function listFoods() {
   );
 }
 
+export async function listFoodAliases() {
+  return getAll("foodAliases");
+}
+
 export async function searchFoods(query) {
   const normalizedQuery = normalizeFoodName(query);
   const foods = await listFoods();

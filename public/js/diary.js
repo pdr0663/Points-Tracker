@@ -1,4 +1,4 @@
-import { add, get, queryIndex, put, remove } from "./db.js";
+import { add, get, queryIndex, put, remove, runTransaction } from "./db.js";
 import { foodPointsForGrams } from "./foods.js";
 import { roundPoints } from "./points.js";
 import { recipePointsForServings } from "./recipes.js";
@@ -9,6 +9,13 @@ const POINT_EPSILON = 1e-9;
 
 function createId(prefix) {
   return `${prefix}-${globalThis.crypto.randomUUID()}`;
+}
+
+function requestResult(request) {
+  return new Promise((resolve, reject) => {
+    request.addEventListener("success", () => resolve(request.result), { once: true });
+    request.addEventListener("error", () => reject(request.error), { once: true });
+  });
 }
 
 function requireText(value, name) {
@@ -130,6 +137,19 @@ export async function createDiaryEntry(input, options = {}) {
   const entry = await buildEntry(input, undefined, options);
   await add("diaryEntries", entry);
   return entry;
+}
+
+export async function createDiaryEntries(inputs, options = {}) {
+  if (!Array.isArray(inputs) || !inputs.length) throw new TypeError("At least one diary entry is required.");
+  const entries = await Promise.all(inputs.map((input, index) => buildEntry(input, undefined, {
+    ...options,
+    entryId: options.entryIdFactory?.(index),
+    timestamp: options.timestamp
+  })));
+  await runTransaction(["diaryEntries"], "readwrite", async (stores) => {
+    await Promise.all(entries.map((entry) => requestResult(stores.diaryEntries.add(entry))));
+  });
+  return entries;
 }
 
 export async function updateDiaryEntry(entryId, input, options = {}) {

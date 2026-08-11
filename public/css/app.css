@@ -39,6 +39,7 @@ button,
 a,
 input,
 select,
+textarea,
 fieldset {
   font: inherit;
 }
@@ -47,6 +48,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -225,7 +227,8 @@ select:focus-visible,
 }
 
 .form-field input,
-.form-field select {
+.form-field select,
+.form-field textarea {
   width: 100%;
   min-height: 2.8rem;
   padding: 0.65rem 0.75rem;
@@ -233,6 +236,12 @@ select:focus-visible,
   background: white;
   border: 1px solid var(--border);
   border-radius: 0.65rem;
+}
+
+.form-field textarea {
+  min-height: 7rem;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .form-note,
@@ -431,6 +440,91 @@ select:focus-visible,
   background: var(--surface-muted);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
+}
+
+.ai-input-card,
+.ai-review-card {
+  margin-bottom: 1rem;
+}
+
+.ai-original-label {
+  margin: 1rem 0 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ai-original-text {
+  margin: 0 0 1.2rem;
+  padding: 0.8rem 1rem;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  background: var(--surface-muted);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 0.65rem 0.65rem 0;
+}
+
+.ai-review-card h4 {
+  margin: 1.2rem 0 0.65rem;
+}
+
+.ai-review-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.ai-review-row {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  background: var(--surface-highlight);
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+}
+
+.ai-review-row--unresolved {
+  background: var(--surface-muted);
+  border-style: dashed;
+}
+
+.ai-review-row__interpreted,
+.ai-review-row__status {
+  margin: 0;
+}
+
+.ai-review-row__interpreted {
+  color: var(--text) !important;
+  font-weight: 750;
+}
+
+.ai-review-row__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 0.65rem;
+}
+
+.ai-review-row__status {
+  font-size: 0.88rem;
+}
+
+.ai-review-row__points {
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+}
+
+.ai-review-summary {
+  padding: 0.8rem 1rem;
+  color: var(--accent-strong) !important;
+  font-weight: 750;
+  background: var(--surface-muted);
+  border-radius: 0.75rem;
+}
+
+.ai-recipe-fields {
+  margin: 1rem 0;
 }
 
 .food-search {

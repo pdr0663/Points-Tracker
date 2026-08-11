@@ -61,6 +61,7 @@ import {
   setCurrentUser,
   updateTargetWeight
 } from "./users.js";
+import { startVoiceRecording, voiceRecordingSupported } from "./voice.js";
 
 const main = document.querySelector("#main-content");
 const profileSwitcher = document.querySelector("#profile-switcher");
@@ -327,6 +328,7 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
 
   if (aiMealWorkflow) {
     const cancel = () => {
+      aiMealWorkflow?.recorder?.cancel();
       aiMealWorkflow = undefined;
       void renderCurrentRoute();
     };
@@ -347,6 +349,8 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
       }, {
         onAddMissingFood: (index, resolution) => startAiFoodForResolution("meal", index, resolution)
       }));
+    } else if (aiMealWorkflow.stage === "voice") {
+      screen.append(createAiVoiceInputCard("meal", aiMealWorkflow, foods, aliases, cancel));
     } else {
       screen.append(createAiTextInputCard("meal", aiMealWorkflow, foods, aliases, cancel));
     }
@@ -385,6 +389,21 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
     aiMealWorkflow = { stage: "input", text: "", meal: "breakfast" };
     void renderCurrentRoute();
   });
+  const recordMeal = createElement("button", {
+    className: "button button--secondary",
+    text: "Record meal",
+    attributes: {
+      type: "button",
+      disabled: foods.length && voiceRecordingSupported() ? undefined : "",
+      title: !voiceRecordingSupported()
+        ? "Voice recording is not supported by this browser."
+        : foods.length ? "Record a meal description, then review it before saving." : "Add saved foods before using AI meal entry."
+    }
+  });
+  recordMeal.addEventListener("click", () => {
+    aiMealWorkflow = { stage: "voice", voiceState: "idle", text: "", transcript: "", meal: "breakfast" };
+    void renderCurrentRoute();
+  });
   const addEntry = createElement("button", { className: "button button--primary", text: "Add food", attributes: { type: "button" } });
   addEntry.addEventListener("click", () => {
     selectedDiaryDate = summary.date;
@@ -403,7 +422,7 @@ function renderTodayScreen(state, summary, weekly, foods, aliases) {
     progressView = "weekly";
     window.location.hash = "progress";
   });
-  actions.append(tellAi, addEntry, viewDiary, viewWeek);
+  actions.append(tellAi, recordMeal, addEntry, viewDiary, viewWeek);
   screen.append(week, actions);
   return screen;
 }
@@ -729,6 +748,134 @@ function createAiTextInputCard(kind, workflow, foods, aliases, onCancel) {
   return card;
 }
 
+function voiceWorkflowIsCurrent(kind, workflow) {
+  return kind === "meal" ? aiMealWorkflow === workflow : aiRecipeWorkflow === workflow;
+}
+
+function createAiVoiceInputCard(kind, workflow, foods, aliases, onCancel) {
+  const isMeal = kind === "meal";
+  const card = createElement("section", { className: "card form-card ai-input-card ai-voice-card" });
+  card.append(
+    createElement("h3", { text: isMeal ? "Record what you ate" : "Record a recipe" }),
+    createElement("p", { text: "Recording starts only when you press the microphone button and stops when you press Stop." })
+  );
+
+  let mealSelect;
+  if (isMeal) {
+    const mealField = createField({
+      label: "Meal",
+      name: "aiVoiceMeal",
+      value: workflow.meal,
+      options: MEALS.map((meal) => ({ value: meal, label: mealLabel(meal) }))
+    });
+    mealSelect = mealField.querySelector("select");
+    mealSelect.disabled = workflow.voiceState !== "idle" && workflow.voiceState !== "error";
+    mealSelect.addEventListener("change", () => { workflow.meal = mealSelect.value; });
+    card.append(mealField);
+  }
+
+  const stateText = {
+    idle: "Ready to record.",
+    recording: "Recording… Press Stop when you have finished.",
+    uploading: "Uploading recording…",
+    transcribing: "Transcribing audio…",
+    interpreting: `Interpreting ${isMeal ? "meal" : "recipe"}…`,
+    error: workflow.errorMessage ?? "Voice entry could not be completed."
+  }[workflow.voiceState] ?? "Ready to record.";
+  card.append(createElement("p", {
+    className: `voice-status voice-status--${workflow.voiceState}`,
+    text: stateText,
+    attributes: { role: "status", "aria-live": "polite" }
+  }));
+  if (workflow.transcript) {
+    card.append(
+      createElement("p", { className: "ai-original-label", text: "Transcript" }),
+      createElement("blockquote", { className: "ai-original-text", text: workflow.transcript })
+    );
+  }
+
+  const actions = createElement("div", { className: "form-actions" });
+  if (["idle", "error"].includes(workflow.voiceState)) {
+    const record = createElement("button", {
+      className: "button button--primary voice-record-button",
+      text: "Start recording",
+      attributes: { type: "button" }
+    });
+    record.addEventListener("click", async () => {
+      record.disabled = true;
+      workflow.errorMessage = "";
+      if (isMeal) workflow.meal = mealSelect.value;
+      try {
+        const recorder = await startVoiceRecording();
+        if (!voiceWorkflowIsCurrent(kind, workflow)) {
+          recorder.cancel();
+          return;
+        }
+        workflow.recorder = recorder;
+        workflow.voiceState = "recording";
+        await renderCurrentRoute();
+      } catch (error) {
+        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
+        console.error("Could not start voice recording", error);
+        workflow.voiceState = "error";
+        workflow.errorMessage = error.message;
+        await renderCurrentRoute();
+      }
+    });
+    actions.append(record);
+  } else if (workflow.voiceState === "recording") {
+    const stop = createElement("button", { className: "button button--primary", text: "Stop recording", attributes: { type: "button" } });
+    stop.addEventListener("click", async () => {
+      stop.disabled = true;
+      const recorder = workflow.recorder;
+      try {
+        workflow.voiceState = "uploading";
+        await renderCurrentRoute();
+        const audio = await recorder.stop();
+        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
+        delete workflow.recorder;
+        workflow.voiceState = "transcribing";
+        await renderCurrentRoute();
+        const { transcript } = await aiClient.transcribe(audio);
+        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
+        workflow.transcript = transcript;
+        workflow.text = transcript;
+        workflow.voiceState = "interpreting";
+        await renderCurrentRoute();
+        const interpretation = isMeal
+          ? await aiClient.interpretMeal(transcript)
+          : await aiClient.interpretRecipe(transcript);
+        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
+        workflow.interpretation = interpretation;
+        workflow.resolutions = createAiResolutions(
+          isMeal ? interpretation.items : interpretation.ingredients,
+          foods,
+          aliases
+        );
+        workflow.recipeName = interpretation.name;
+        workflow.recipeServings = interpretation.servings;
+        workflow.stage = "review";
+        workflow.inputMethod = "voice";
+        workflow.editing = false;
+        await renderCurrentRoute();
+      } catch (error) {
+        if (!voiceWorkflowIsCurrent(kind, workflow)) return;
+        delete workflow.recorder;
+        console.error(`Could not complete voice ${kind} entry`, error);
+        workflow.voiceState = "error";
+        workflow.errorMessage = error.message;
+        await renderCurrentRoute();
+      }
+    });
+    actions.append(stop);
+  }
+  const cancel = createElement("button", { className: "button button--secondary", text: "Cancel", attributes: { type: "button" } });
+  cancel.addEventListener("click", onCancel);
+  actions.append(cancel);
+  card.append(actions);
+  return card;
+}
+
 function aiMatchText(resolution, calculated) {
   if (!calculated.resolved) {
     return resolution.foodId ? "Serving unresolved — choose how the quantity should be measured." : "Unresolved — choose a saved food.";
@@ -750,7 +897,7 @@ function createAiReviewCard(kind, workflow, foods, onCancel, onConfirm, options 
         ? `Confirmed missing foods have been saved to the shared food database. ${isMeal ? "No diary items" : "The recipe"} will be saved only after final confirmation.`
         : "No data has been saved. Check every match and quantity before confirming."
     }),
-    createElement("p", { className: "ai-original-label", text: "Original text" }),
+    createElement("p", { className: "ai-original-label", text: workflow.inputMethod === "voice" ? "Transcript" : "Original text" }),
     createElement("blockquote", { className: "ai-original-text", text: workflow.text })
   );
 
@@ -1734,7 +1881,22 @@ function renderRecipesScreen(recipes, foods, aliases) {
     aiRecipeWorkflow = { stage: "input", text: "" };
     void renderCurrentRoute();
   });
-  headerActions.append(addRecipe, addWithAi);
+  const recordRecipe = createElement("button", {
+    className: "button button--secondary",
+    text: "Record recipe",
+    attributes: {
+      type: "button",
+      disabled: voiceRecordingSupported() ? undefined : "",
+      title: voiceRecordingSupported() ? "Record a recipe, then review it before saving." : "Voice recording is not supported by this browser."
+    }
+  });
+  recordRecipe.addEventListener("click", () => {
+    showingRecipeForm = false;
+    editingRecipeId = undefined;
+    aiRecipeWorkflow = { stage: "voice", voiceState: "idle", text: "", transcript: "" };
+    void renderCurrentRoute();
+  });
+  headerActions.append(addRecipe, addWithAi, recordRecipe);
   header.append(headerActions);
   screen.append(header);
   if (recipeNotice) {
@@ -1748,6 +1910,7 @@ function renderRecipesScreen(recipes, foods, aliases) {
   }
   if (aiRecipeWorkflow) {
     const cancel = () => {
+      aiRecipeWorkflow?.recorder?.cancel();
       aiRecipeWorkflow = undefined;
       void renderCurrentRoute();
     };
@@ -1764,6 +1927,8 @@ function renderRecipesScreen(recipes, foods, aliases) {
       }, {
         onAddMissingFood: (index, resolution) => startAiFoodForResolution("recipe", index, resolution)
       }));
+    } else if (aiRecipeWorkflow.stage === "voice") {
+      screen.append(createAiVoiceInputCard("recipe", aiRecipeWorkflow, foods, aliases, cancel));
     } else {
       screen.append(createAiTextInputCard("recipe", aiRecipeWorkflow, foods, aliases, cancel));
     }

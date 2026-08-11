@@ -1,6 +1,6 @@
 # Points Tracker
 
-A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional; M10 provides the server-side boundary, M11 adds reviewed text entry for meals and recipes, and M12 adds reviewed food creation and estimates.
+A lightweight, mobile-first Points tracker for two household users. The core application stores its data locally in IndexedDB and performs all point calculations deterministically in the browser. AI assistance is optional; M10 provides the server-side boundary, M11 adds reviewed text entry for meals and recipes, M12 adds reviewed food creation and estimates, and M13 adds push-to-record voice entry.
 
 ## Requirements
 
@@ -102,9 +102,9 @@ Implemented milestones:
 - M10: optional server-side OpenAI boundary, strict structured-output schemas and validation, upload and request limits, health reporting, controlled cross-origin access, and consistent errors
 - M11: text meal and recipe interpretation, exact/alias/conservative probable food matching, editable review, deterministic Points previews, unresolved-item blocking, and explicit atomic confirmation
 - M12: AI-assisted food extraction and generic estimates, strict server/browser validation, deterministic per-serving conversion and Points previews, duplicate review, visible provenance, and return from missing-food creation to preserved meal or recipe review
+- M13: explicit start/stop voice recording for meals and recipes, visible upload/transcription/interpretation states, transcript review, safe cancellation and microphone cleanup, and reuse of the existing confirmation workflows
 
-Voice input, nutrition-label scanning, offline/PWA polish, and final QA follow
-as M13–M16.
+Nutrition-label scanning, offline/PWA polish, and final QA follow as M14–M16.
 
 ## Architecture
 
@@ -127,7 +127,7 @@ Normal tracking must continue working if the AI API is unavailable.
 
 `server/schemas.js` defines the structured-output contracts. `server/validation.js` independently validates request data and every model-produced object before it can reach browser code. Audio and image uploads are accepted as bounded raw request bodies, avoiding unnecessary upload middleware.
 
-`public/js/ai.js` owns the browser API client, response revalidation, saved-food matching, unit/serving resolution, deterministic per-serving nutrition conversion, and review calculations. AI text is never written directly to the DOM as HTML. Meal confirmation uses one IndexedDB transaction, while recipe confirmation passes through the ordinary recipe engine. AI-created foods pass through the ordinary food validator and database, with server-owned `ai-text` or `ai-estimate` provenance. Unresolved foods or units prevent confirmation until the user selects or creates a saved food and serving.
+`public/js/ai.js` owns the browser API client, response revalidation, saved-food matching, unit/serving resolution, deterministic per-serving nutrition conversion, and review calculations. `public/js/voice.js` owns the short-lived browser `MediaRecorder` session and always releases its microphone track after stop, failure, or cancellation. Voice capture requires a current browser in a secure context such as HTTPS or localhost. AI text is never written directly to the DOM as HTML. Meal confirmation uses one IndexedDB transaction, while recipe confirmation passes through the ordinary recipe engine. AI-created foods pass through the ordinary food validator and database, with server-owned `ai-text` or `ai-estimate` provenance. Unresolved foods or units prevent confirmation until the user selects or creates a saved food and serving.
 
 ## Data storage
 

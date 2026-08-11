@@ -447,6 +447,32 @@ textarea:focus-visible,
   margin-bottom: 1rem;
 }
 
+.voice-status {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.voice-status--recording {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.voice-status--uploading,
+.voice-status--transcribing,
+.voice-status--interpreting {
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: var(--text);
+}
+
+.voice-status--error {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+}
+
 .ai-original-label {
   margin: 1rem 0 0.35rem;
   color: var(--text-muted);

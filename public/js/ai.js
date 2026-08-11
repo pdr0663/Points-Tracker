@@ -28,6 +28,12 @@ function requireText(value, label, maxLength = 300) {
   }
 }
 
+export function validateTranscription(value) {
+  requireExactKeys(value, ["transcript"], "Transcription");
+  requireText(value.transcript, "Transcript", 20000);
+  return value;
+}
+
 function requirePositiveNumber(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new AiRequestError("AI_INVALID_RESPONSE", `${label} must be greater than zero.`);
@@ -206,6 +212,15 @@ export function createAiClient(options = {}) {
         body: JSON.stringify({ text, mode })
       });
       return validateFoodInterpretation(result);
+    },
+    async transcribe(audio) {
+      if (!(audio instanceof Blob) || !audio.size) throw new TypeError("A non-empty audio recording is required.");
+      const result = await request("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": audio.type || "audio/webm" },
+        body: audio
+      });
+      return validateTranscription(result);
     }
   });
 }

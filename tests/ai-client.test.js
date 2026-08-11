@@ -9,7 +9,8 @@ import {
   matchFood,
   validateFoodInterpretation,
   validateMealInterpretation,
-  validateRecipeInterpretation
+  validateRecipeInterpretation,
+  validateTranscription
 } from "../public/js/ai.js";
 
 const foods = [
@@ -79,6 +80,26 @@ test("network errors become a user-safe error without losing input in applicatio
     assert.match(error.message, /original text has been kept/iu);
     return true;
   });
+});
+
+test("AI client uploads one raw recording and validates the transcript", async () => {
+  let request;
+  const client = createAiClient({
+    fetchImpl: async (url, init) => {
+      request = { url, init };
+      return new Response(JSON.stringify({ transcript: "two eggs and toast" }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+  });
+  const audio = new Blob(["recorded audio"], { type: "audio/webm" });
+  assert.deepEqual(await client.transcribe(audio), { transcript: "two eggs and toast" });
+  assert.equal(request.url, "/api/transcribe");
+  assert.equal(request.init.method, "POST");
+  assert.equal(request.init.headers["Content-Type"], "audio/webm");
+  assert.equal(request.init.body, audio);
+  assert.throws(() => validateTranscription({ transcript: "two eggs", extra: true }), { code: "AI_INVALID_RESPONSE" });
+  await assert.rejects(client.transcribe(new Blob([])), TypeError);
 });
 
 test("AI food client sends explicit mode and validates server-owned provenance", async () => {

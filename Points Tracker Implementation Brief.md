@@ -2103,18 +2103,10 @@ When implementing this repository:
 
 ---
 
-# 46. Current Next Task
+# 46. Version 1 Release Checkpoint
 
-M0-M19 have been implemented. The approved architecture supersedes M10-M14.
+M0-M20 have been implemented. The approved architecture supersedes M10-M14.
 
-The next implementation checkpoint is M20 only:
+The M20 release checkpoint includes the complete automated suite, responsive Chromium checks at 320, 375, 430, and 768 pixels plus desktop, explicit recording of unavailable Safari and physical mobile-device checks, AFCD attribution, database upgrades, import validation and recovery, atomic recipe rollback, backup/restore, GitHub Pages packaging, offline operation, and final setup/architecture/data-source/authoring/licence/troubleshooting documentation.
 
-```text
-1. Run the complete automated suite and manually verify all Version 1 workflows.
-2. Test widths of 320, 375, 430, and 768 pixels plus desktop.
-3. Test Chrome desktop, Safari desktop where available, Chrome Android, and Safari on iPhone/iPad where available.
-4. Verify AFCD attribution, upgrades, imports, atomic recipe rollback, backup/restore, GitHub Pages deployment, and offline operation.
-5. Complete README setup, architecture, data-source, authoring, licence, and troubleshooting documentation.
-```
-
-Version 1 is complete after the M20 checkpoint has been reviewed.
+Version 1 is implementation-complete. Platform-specific checks recorded as unavailable in `VERSION_1_QA.md` remain recommended before making device-specific compatibility claims.

@@ -58,3 +58,29 @@ test("Pages workflow publishes only the static public directory", async () => {
   assert.match(workflow, /npm test/);
   assert.doesNotMatch(workflow, /path: ['"]?\.(?:['"]|\s|$)/);
 });
+
+test("Version 1 release metadata and documentation are complete", async () => {
+  const packageDocument = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const worker = await readFile(new URL("../public/service-worker.js", import.meta.url), "utf8");
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const qa = await readFile(new URL("../VERSION_1_QA.md", import.meta.url), "utf8");
+
+  assert.equal(packageDocument.version, "1.0.0");
+  assert.match(worker, /CACHE_PREFIX = "points-tracker-"/);
+  assert.match(worker, /CACHE_NAME = .*v1\.0\.0/);
+  for (const heading of ["Running locally", "Architecture", "AFCD source material", "JSON authoring and import", "Licence and attribution", "Troubleshooting"]) {
+    assert.match(readme, new RegExp(`## ${heading}`));
+  }
+  assert.match(readme, /does not require an OpenAI account, API key, environment file, Node server, or runtime API/i);
+  assert.match(qa, /320 px/);
+  assert.match(qa, /375 px/);
+  assert.match(qa, /430 px/);
+  assert.match(qa, /768 px/);
+});
+
+test("both production themes allow a 320 px viewport without forcing horizontal overflow", async () => {
+  for (const stylesheet of ["app.css", "app-muted.css"]) {
+    const css = await readFile(new URL(`../public/css/${stylesheet}`, import.meta.url), "utf8");
+    assert.doesNotMatch(css, /html\s*\{[^}]*min-width:\s*320px/s);
+  }
+});

@@ -94,7 +94,8 @@ test("install precaches every application module and required offline asset", as
 });
 
 test("activation removes only stale Points Tracker caches and claims clients", async () => {
-  const harness = workerHarness({ cacheNames: ["points-tracker-m18", "points-tracker-m19-v1", "unrelated-cache"] });
+  const currentCache = workerHarness().constants.CACHE_NAME;
+  const harness = workerHarness({ cacheNames: ["points-tracker-m18", currentCache, "unrelated-cache"] });
   await lifetimeEvent(harness.listeners.activate);
   assert.deepEqual(harness.state().deleted, ["points-tracker-m18"]);
   assert.equal(harness.state().claimed, true);

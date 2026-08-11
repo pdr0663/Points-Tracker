@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "points-tracker-";
-const CACHE_NAME = `${CACHE_PREFIX}m19-v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v1.0.0`;
 const APP_SHELL = "./index.html";
 const PRECACHE_URLS = [
   "./",

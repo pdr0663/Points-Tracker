@@ -1,12 +1,14 @@
 # Points Tracker
 
-A lightweight, mobile-first Points tracker for a household. The application is entirely static, stores its data locally in IndexedDB, and performs all calculations deterministically in the browser.
+A lightweight, mobile-first Points tracker for a household. Version 1 is entirely static, stores its data locally in IndexedDB, and performs all calculations deterministically in the browser.
 
-The production application has no integrated AI service, backend, account requirement, or API key. Food and recipe information can be entered manually or prepared in an external tool and pasted as validated JSON.
+The production application has no integrated AI service or backend. It does not require an OpenAI account, API key, environment file, Node server, or runtime API. Food and recipe information can be entered manually or prepared in an external tool and pasted as validated JSON.
 
 ## Running locally
 
-Install the test dependency:
+The production application needs only a static HTTPS host. Node.js is used for contributor tests and catalogue generation, not when running the deployed application.
+
+For contributor work, install the test dependency:
 
 ```powershell
 npm install
@@ -28,17 +30,19 @@ Run the automated tests with:
 npm test
 ```
 
+No `.env` file or service credentials are used.
+
 ## GitHub Pages
 
 The workflow in `.github/workflows/pages.yml` runs the complete test suite and publishes only the `public` directory. In the repository settings, select **GitHub Actions** as the Pages source.
 
-All application asset paths are relative, so deployment beneath a repository subpath is supported.
+All application asset paths are relative, so deployment beneath a repository subpath is supported. A push to `main` must pass the complete automated suite before the static artifact is deployed.
 
 ## Offline installation and updates
 
 After one successful online load, the service worker caches the complete application shell, all JavaScript and CSS, import schemas and examples, icons, and the AFCD catalogue. Tracking, saved/reference food search, food and recipe imports, progress, export, and restore then continue to work without a network connection; household data remains in IndexedDB.
 
-The manifest supports installation from browsers that offer **Install app** or **Add to Home Screen**. A newly deployed service worker precaches its complete version before activation, removes older Points Tracker caches, and takes control without deleting IndexedDB data. If an interrupted first load prevents installation, reconnect and reload once so the complete cache can be created. Browser storage clearing removes both offline assets and local household data, so export a backup first.
+The manifest supports installation from browsers that offer **Install app** or **Add to Home Screen**. A newly deployed service worker precaches its complete version before activation, removes older Points Tracker caches, and takes control without deleting IndexedDB data. Change its cache version whenever a cached production asset changes. If an interrupted first load prevents installation, reconnect and reload once so the complete cache can be created. Browser storage clearing removes both offline assets and local household data, so export a backup first.
 
 Regenerate the checked-in 192 px and 512 px icons on Windows with:
 
@@ -75,7 +79,7 @@ Published schemas and examples are available at:
 - `public/examples/food-import-v1.json`
 - `public/examples/recipe-import-v1.json`
 
-The repository-level `ChatGPT JSON Authoring Guide.md` explains how an external ChatGPT Project can prepare compatible JSON. ChatGPT is optional and remains entirely outside the application.
+The repository-level [`ChatGPT JSON Authoring Guide.md`](./ChatGPT%20JSON%20Authoring%20Guide.md) explains how an external ChatGPT Project can prepare compatible JSON. ChatGPT is optional and remains entirely outside the application; any text editor or JSON-producing tool can author the same documents.
 
 ## AFCD source material
 
@@ -100,6 +104,12 @@ The Foods search shows saved foods first and AFCD reference foods second. Review
 
 AFCD material is sourced from Food Standards Australia New Zealand. Retain its attribution, licence information, Australian-data notice, and limitation statements when redistributing derived data.
 
+## Licence and attribution
+
+The bundled AFCD-derived catalogue is based on Australian Food Composition Database Release 3 from Food Standards Australia New Zealand. It is distributed subject to the [FSANZ Data User Licence Agreement](https://www.foodstandards.gov.au/science-data/monitoringnutrients/afcd/datauserlicenceagreement), which is based on the Creative Commons Attribution-ShareAlike 3.0 Australia licence. Preserve the FSANZ attribution, source-release information, Australian-data notice, share-alike requirements, and limitation statement when redistributing the catalogue or its source extract.
+
+The full source and transformation record is in [`AFCD Release 3 - Points Tracker Extract Notes.md`](./AFCD%20Release%203%20-%20Points%20Tracker%20Extract%20Notes.md). No separate software licence is granted for the application code by this repository; obtain permission from the repository owner before redistributing it.
+
 ## Architecture
 
 The browser application uses dependency-light ES modules under `public/js`:
@@ -123,6 +133,23 @@ The browser application uses dependency-light ES modules under `public/js`:
 
 There is no production server directory. GitHub Pages hosts the complete application.
 
-## Current milestone
+## Browser support and Version 1 QA
 
-M19 completes the installable offline application: the full Version 1 shell, imports, AFCD catalogue, progress, and backup features are cached after the first successful load, with versioned update cleanup and offline recovery. M20 final QA and documentation is next.
+The layout is designed for 320 px, 375 px, 430 px, 768 px, and desktop viewports. The release checkpoint covers the Chrome rendering engine on desktop and responsive mobile/tablet sizes. Safari desktop and physical Android/iPhone/iPad testing should be repeated on those platforms when they are available.
+
+The reproducible release checklist and recorded M20 results are in [`VERSION_1_QA.md`](./VERSION_1_QA.md). Automated coverage includes database upgrades, import validation and recovery, atomic recipe rollback, backup/restore, GitHub Pages paths, PWA installation, and offline responses.
+
+## Troubleshooting
+
+- **The app does not install or work offline:** open it once while connected over HTTPS or `localhost`, wait for the page to finish loading, then reload. Direct `file:` URLs cannot install a service worker.
+- **A newly deployed version still looks old:** close other Points Tracker tabs and reload while connected. The new cache activates only after its complete asset set has downloaded; local IndexedDB records are retained.
+- **AFCD results do not appear:** clear the food-search term and search again. If the first installation was interrupted, reconnect and reload so `afcd-reference.json` can be cached.
+- **Pasted JSON is rejected:** use bare JSON or exactly one Markdown `json` code block, keep the document below 64 KiB, and compare it with the published schema and example. The editor retains invalid input for correction.
+- **A recipe import cannot be confirmed:** resolve every possible food match in the review. Cancellation or any unresolved/failed import writes neither foods nor the recipe.
+- **Restore is refused:** select a complete unedited Points Tracker backup. Validation occurs before confirmation and a failed restore leaves the existing database unchanged.
+- **Local data is missing on another browser or device:** IndexedDB data is local to the exact browser profile and site origin. Export a backup on the original installation and restore it on the other installation.
+- **Before clearing browser storage:** export a backup. Clearing site data removes profiles, foods, recipes, diary entries, weigh-ins, preferences, and offline assets.
+
+## Release status
+
+M20 completes the Version 1 implementation and release checkpoint. The static application, deterministic calculations, local database, household tracking, AFCD search, reviewed JSON imports, progress, backup/restore, GitHub Pages deployment path, and offline installation are implemented and covered by the release checklist.

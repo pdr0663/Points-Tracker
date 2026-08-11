@@ -11,7 +11,7 @@ The application must:
 * use vanilla HTML, CSS, and JavaScript
 * support two or more household users
 * support foods, recipes, diary entries, weigh-ins, goals, and progress
-* provide AI-assisted meal, recipe, voice, and nutrition-label input
+* provide AI-assisted meal, recipe, food, voice, and nutrition-label input
 * use a server-side OpenAI integration
 * never expose the OpenAI API key to browser code
 * keep all Points calculations deterministic and local
@@ -57,10 +57,11 @@ M8  Progress
 M9  Backup and restore
 M10 AI backend
 M11 AI meal and recipe entry
-M12 Voice input
-M13 Nutrition-label image input
-M14 PWA/offline polish
-M15 Final test and cleanup
+M12 AI food entry
+M13 Voice input
+M14 Nutrition-label image input
+M15 PWA/offline polish
+M16 Final test and cleanup
 ```
 
 Do not begin a later milestone until the previous milestone's acceptance tests pass.
@@ -1152,6 +1153,28 @@ unresolved
 
 Probable matches must still be reviewable.
 
+## Missing Recipe Foods
+
+After deterministic matching, each unresolved recipe ingredient must offer:
+
+```text
+Add food with AI
+```
+
+This opens the ordinary AI-assisted Add Food workflow with the ingredient name
+prefilled and generic nutritional suggestion mode selected. Do not request new
+nutrition for ingredients already matched to saved foods.
+
+The suggested nutrition must be labelled `AI estimate`, remain fully editable,
+and pass the ordinary food validator. After the user confirms the food, save it
+to the shared food database, return to the recipe review, and automatically
+match the ingredient to the new food. Cancelling Add Food returns to the recipe
+with the ingredient still unresolved.
+
+The recipe itself cannot be confirmed until every ingredient references a saved
+food. If the user later cancels the recipe, any food they explicitly reviewed
+and confirmed remains as an ordinary reusable food record.
+
 ## AI Review Screen
 
 Always display:
@@ -1189,9 +1212,154 @@ Confirming creates correct deterministic diary entries.
 
 Cancelling creates nothing.
 
+For a recipe containing an unknown ingredient, `Add food with AI` offers
+editable AI-estimated nutrition in the ordinary food form. Confirming the food
+returns to the recipe and resolves the ingredient; cancelling leaves it
+unresolved. The completed recipe references the saved food record.
+
 ---
 
-# 19. Milestone M12 — Voice Input
+# 19. Milestone M12 — AI Food Input
+
+Add an AI-assisted option to the ordinary food-creation screen.
+
+The user may type or paste a description containing food identity, nutrition,
+and serving information, for example:
+
+```text
+Example Brand Greek yoghurt. Per 100 g: protein 9.5 g,
+carbohydrate 6.2 g, fat 2.8 g, fibre 0 g. One tub is 170 g.
+```
+
+Send the text and explicit operation to:
+
+```text
+POST /api/interpret-food
+```
+
+```json
+{
+  "text": "Greek yoghurt, protein 9.5 g per 100 g...",
+  "mode": "extract"
+}
+```
+
+`mode` must be `extract` or `estimate`. Recipe Add Food uses `estimate` with
+only the unresolved ingredient description. The backend assigns the response
+provenance from this mode.
+
+## Canonical Food Schema
+
+```json
+{
+  "type": "food",
+  "name": "Greek yoghurt",
+  "brand": "Example Brand",
+  "servings": [
+    {
+      "description": "1 tub",
+      "grams": 170
+    }
+  ],
+  "nutrition": {
+    "basis": "per-100g",
+    "servingGrams": null,
+    "protein": 9.5,
+    "carbohydrate": 6.2,
+    "fat": 2.8,
+    "fibre": 0
+  }
+}
+```
+
+`name`, `brand`, serving fields, and nutrient values may be `null` when the
+input does not state them. Unknown values must remain unknown. The model must
+not be asked to calculate Points.
+
+`nutrition.basis` must be `per-100g` or `per-serving`. When the source values
+are per serving, `nutrition.servingGrams` records the explicitly stated serving
+weight. Browser code performs the conversion to per-100-g values. Confirmation
+is blocked if the conversion lacks sufficient information.
+
+M12 supports two explicitly distinct operations:
+
+```text
+extract stated nutrition from user-supplied text
+suggest generic nutrition for a missing food
+```
+
+The second operation is used deliberately by standalone food creation or by
+the unresolved-ingredient recipe workflow. The application and backend assign
+the `AI estimate` provenance from the operation requested; they must not trust
+the model to describe its own output as stated or estimated.
+
+## Review and Confirmation
+
+Reuse the ordinary food editor rather than creating a separate AI-food form or
+database. Always display:
+
+```text
+original text
+name and brand
+nutrition per 100 g
+all named servings and gram weights
+stated extraction or AI-estimate source status
+locally calculated PP per 100 g and default serving
+missing or invalid fields
+possible duplicate saved foods
+```
+
+The ordinary food form starts in an editable state. Confirmation remains disabled until
+the existing deterministic food validator can create a complete valid food.
+Potential duplicates require an explicit choice to edit the existing food or
+create a new food.
+
+Buttons:
+
+```text
+Confirm and create food
+Cancel
+```
+
+No interpreted food may be written before Confirm. Confirmation must call the
+ordinary `createFood` or `updateFood` service and set the source to `ai-text`
+or `ai-estimate` as determined by the initiating operation.
+
+## Implementation Plan
+
+1. Add a strict food structured-output schema and server-side validator.
+2. Add `interpretFood(text, mode)` to the isolated OpenAI service and expose
+   `POST /api/interpret-food` using the existing request limits and errors.
+3. Add browser response revalidation and `interpretFood` to `public/js/ai.js`.
+4. Add a "Create with AI" action to Foods and preserve the original text on
+   errors or cancellation.
+5. Map the response into the ordinary food editor, including multiple servings,
+   deterministic per-serving to per-100-g conversion, missing-field highlighting,
+   duplicate detection, and deterministic PP preview.
+6. Add `Add food with AI` to unresolved recipe rows. Preserve the pending recipe
+   workflow while the shared food form runs, then return and match the newly
+   created food automatically.
+7. Add schema, route, client, estimate-labelling, duplicate, cancellation,
+   workflow-resume, validation, and confirmation tests, then perform 320 px and
+   desktop browser checks.
+
+## Definition of Done
+
+Typing the example above produces an editable review with 9.5 g protein,
+6.2 g carbohydrate, 2.8 g fat, 0 g fibre, a 170 g tub, and deterministic PP.
+
+Confirm creates one ordinary shared food record. Cancel creates nothing.
+Missing required nutrition blocks confirmation, and no API-supplied Points value
+is accepted.
+
+An AI recipe with a missing food offers `Add food with AI`. Confirming its
+editable nutritional estimate creates one ordinary food, returns to the recipe,
+and resolves that ingredient. Confirming the recipe then creates a recipe whose
+ingredients all reference saved foods.
+
+---
+
+# 20. Milestone M13 — Voice Input
 
 Use browser `MediaRecorder`.
 
@@ -1236,7 +1404,7 @@ A failed transcription must not lose the user's existing diary state.
 
 ---
 
-# 20. Milestone M13 — Nutrition Label Scanning
+# 21. Milestone M14 — Nutrition Label Scanning
 
 Support:
 
@@ -1293,7 +1461,7 @@ There must not be a separate AI-food database.
 
 ---
 
-# 21. Milestone M14 — Offline/PWA Support
+# 22. Milestone M15 — Offline/PWA Support
 
 Implement application manifest.
 
@@ -1330,7 +1498,7 @@ rather than failing mysteriously.
 
 ---
 
-# 22. Milestone M15 — Final QA
+# 23. Milestone M16 — Final QA
 
 Test on:
 
@@ -1355,7 +1523,7 @@ desktop
 
 ---
 
-# 23. API Schemas
+# 24. API Schemas
 
 Use strict structured-output schemas.
 
@@ -1378,9 +1546,33 @@ weight-loss advice
 
 unless specifically requested by a later feature.
 
+## Food Interpretation
+
+```text
+type: "food"
+name: string|null
+brand: string|null
+servings: array of { description: string|null, grams: number|null }
+nutrition: {
+  basis: "per-100g"|"per-serving",
+  servingGrams: number|null,
+  protein, carbohydrate, fat, fibre
+}
+```
+
+Reject extra fields, including API-supplied calories or Points. Enforce bounded
+text, array, and numeric values server-side and revalidate the response in the
+browser.
+
+`POST /api/interpret-food` accepts `text` and `mode`. In `extract` mode, unknown
+facts remain null. In `estimate` mode, suggested nutrition must be complete
+enough for deterministic calculation. The backend adds `ai-text` or
+`ai-estimate` provenance after validating model output; provenance is not a
+model-authoritative field.
+
 ---
 
-# 24. Error Handling Contract
+# 25. Error Handling Contract
 
 Client errors should be represented consistently.
 
@@ -1415,7 +1607,7 @@ Log useful development information to the console.
 
 ---
 
-# 25. Food Matching Design
+# 26. Food Matching Design
 
 Implement deterministic matching before asking AI.
 
@@ -1444,7 +1636,7 @@ rather than silently accepted.
 
 ---
 
-# 26. Calculation Rules
+# 27. Calculation Rules
 
 All calculations must ultimately flow through central functions.
 
@@ -1466,7 +1658,7 @@ UI code must not reproduce these calculations manually.
 
 ---
 
-# 27. Date Handling
+# 28. Date Handling
 
 Store diary dates as local calendar dates:
 
@@ -1490,7 +1682,7 @@ Period and diary logic must operate using local dates.
 
 ---
 
-# 28. Accessibility
+# 29. Accessibility
 
 Required:
 
@@ -1505,7 +1697,7 @@ Required:
 
 ---
 
-# 29. UI Behaviour
+# 30. UI Behaviour
 
 Optimise common actions.
 
@@ -1527,7 +1719,7 @@ Do not require navigating through several screens for each diary item.
 
 ---
 
-# 30. Testing Strategy
+# 31. Testing Strategy
 
 Use automated tests for deterministic code.
 
@@ -1549,7 +1741,7 @@ Never rely solely on manual testing for numerical logic.
 
 ---
 
-# 31. Required Unit Tests
+# 32. Required Unit Tests
 
 ## Food formula
 
@@ -1623,7 +1815,7 @@ progress = 50%
 
 ---
 
-# 32. Integration Tests
+# 33. Integration Tests
 
 At least manually verify:
 
@@ -1650,11 +1842,24 @@ Receive interpretation
 Resolve food matches
 Confirm
 Observe diary update
+
+Enter food nutrition and serving text
+Receive structured food interpretation
+Review locally calculated PP
+Cancel and verify nothing was saved
+Repeat and confirm one ordinary food record was created
+
+Enter a recipe containing a food absent from the database
+Choose Add food with AI for the unresolved ingredient
+Receive a visibly labelled, editable nutritional estimate
+Cancel and verify the recipe remains unresolved
+Repeat, confirm the food, and verify return to the preserved recipe review
+Confirm the recipe and verify that it references the new saved food
 ```
 
 ---
 
-# 33. Sample Seed Data
+# 34. Sample Seed Data
 
 During development only, provide an optional seed script with:
 
@@ -1675,7 +1880,7 @@ Do not automatically install seed data in production mode.
 
 ---
 
-# 34. Configuration
+# 35. Configuration
 
 Provide:
 
@@ -1705,7 +1910,7 @@ height unit = cm
 
 ---
 
-# 35. README Requirements
+# 36. README Requirements
 
 README must contain:
 
@@ -1750,7 +1955,7 @@ Never place the OpenAI API key in public/js files.
 
 ---
 
-# 36. Security Requirements
+# 37. Security Requirements
 
 The implementation must not:
 
@@ -1773,7 +1978,7 @@ backup JSON
 
 ---
 
-# 37. Privacy Requirements
+# 38. Privacy Requirements
 
 Do not send unnecessary personal data to OpenAI.
 
@@ -1813,7 +2018,7 @@ diary history
 
 ---
 
-# 38. Non-Functional Requirements
+# 39. Non-Functional Requirements
 
 The application should:
 
@@ -1828,7 +2033,7 @@ The application should:
 
 ---
 
-# 39. Definition of Done — Version 1
+# 40. Definition of Done — Version 1
 
 Version 1 is complete when all of the following work:
 
@@ -1850,6 +2055,7 @@ Version 1 is complete when all of the following work:
 ✓ Export backup
 ✓ Restore backup
 ✓ Type a meal in natural language
+✓ Create a food from typed or pasted nutrition facts
 ✓ Dictate a meal
 ✓ Dictate a recipe
 ✓ Scan a nutrition label
@@ -1862,7 +2068,7 @@ No blocking console errors should remain.
 
 ---
 
-# 40. Codex Working Instructions
+# 41. Codex Working Instructions
 
 When implementing this repository:
 
@@ -1883,7 +2089,7 @@ When implementing this repository:
 
 ---
 
-# 41. First Codex Task
+# 42. First Codex Task
 
 Begin with Milestones M0–M2 only.
 

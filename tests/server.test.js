@@ -33,6 +33,7 @@ function unavailableAi() {
     configured: false,
     interpretMeal: async () => { throw error; },
     interpretRecipe: async () => { throw error; },
+    interpretFood: async () => { throw error; },
     transcribe: async () => { throw error; },
     scanLabel: async () => { throw error; }
   };
@@ -79,6 +80,32 @@ test("meal and recipe routes pass only validated text to the AI module", async (
     assert.equal(meal.status, 200);
     assert.equal(recipe.status, 200);
     assert.deepEqual(seen, [["meal", "toast"], ["recipe", "soup"]]);
+  });
+});
+
+test("food route passes trimmed text and explicit mode to the AI module", async () => {
+  const seen = [];
+  const ai = {
+    configured: true,
+    interpretFood: async (text, mode) => {
+      seen.push([text, mode]);
+      return { type: "food", provenance: mode === "estimate" ? "ai-estimate" : "ai-text" };
+    }
+  };
+  await withServer(ai, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/interpret-food`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: " brown onion ", mode: "estimate" })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, [["brown onion", "estimate"]]);
+    const invalid = await fetch(`${baseUrl}/api/interpret-food`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "brown onion" })
+    });
+    assert.equal(invalid.status, 400);
   });
 });
 

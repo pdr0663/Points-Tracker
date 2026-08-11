@@ -12,7 +12,7 @@ The application must support:
 * recipes
 * weight tracking
 * progress toward a target weight
-* AI-assisted entry using text, voice, and nutrition-label images
+* AI-assisted meal, recipe, and food entry using text, voice, and nutrition-label images
 * local-first operation
 * secure use of the OpenAI API
 * backup and restore
@@ -579,7 +579,9 @@ The application must never save AI-generated food or diary data without presenti
 
 ---
 
-# 16. AI Text Food Entry
+# 16. AI Text Entry
+
+## 16.1 Meal entry
 
 The user may enter natural language such as:
 
@@ -627,6 +629,80 @@ Total                        6.2 PP
 
 [ Correct ]        [ Add to breakfast ]
 ```
+
+## 16.2 Food record creation
+
+The Foods screen must offer AI-assisted creation from typed or pasted text.
+This is distinct from entering a meal: it creates one reusable food record in
+the existing shared food database.
+
+Example input:
+
+```text
+Example Brand Greek yoghurt. Per 100 g: protein 9.5 g,
+carbohydrate 6.2 g, fat 2.8 g, fibre 0 g. One tub is 170 g.
+```
+
+Canonical interpretation:
+
+```json
+{
+  "type": "food",
+  "name": "Greek yoghurt",
+  "brand": "Example Brand",
+  "servings": [
+    {
+      "description": "1 tub",
+      "grams": 170
+    }
+  ],
+  "nutrition": {
+    "basis": "per-100g",
+    "servingGrams": null,
+    "protein": 9.5,
+    "carbohydrate": 6.2,
+    "fat": 2.8,
+    "fibre": 0
+  }
+}
+```
+
+The feature has two explicit modes:
+
+```text
+extract stated nutrition
+estimate generic nutrition
+```
+
+In extraction mode, the AI must extract only facts present in the input.
+Unknown names, brands, servings, serving weights, and nutrient values remain
+`null`. In estimate mode, the AI may offer typical generic nutritional values
+for the named food. It must not calculate or return Points in either mode.
+
+Nutrition may use `per-100g` or `per-serving` as its basis. For per-serving
+input, preserve the stated nutrient values and serving weight; deterministic
+browser code converts them to per-100-g values. Insufficient conversion data
+must remain unresolved.
+
+The review must reuse the ordinary food editor and show:
+
+* original text
+* name and brand
+* nutrition values and their original basis
+* named servings and gram weights
+* missing or invalid fields
+* possible duplicate saved foods
+* locally calculated Points per 100 g and default serving
+* whether the source is stated AI extraction or an AI estimate
+
+Every extracted value must be editable. A complete valid record and explicit
+confirmation are required before saving. Confirmation saves through the normal
+food service; there must not be a separate AI-food database.
+
+Estimate mode must be a deliberate user action. The application must visibly
+label and store estimated provenance itself; it must not trust the model to
+self-certify an estimate as stated information. An estimate must never silently
+replace missing stated information or a food already matched in the database.
 
 ---
 
@@ -787,6 +863,20 @@ Mushrooms             ? unresolved
 
 The user must resolve or approve unresolved ingredients before the recipe is considered complete.
 
+Each unresolved ingredient must offer `Add food with AI`. This opens the same
+AI-assisted food form used by the Foods screen, prefills the ingredient name,
+and requests generic nutritional suggestions. The suggestions must be clearly
+labelled `AI estimate`, editable, and validated before the user can confirm.
+
+Confirming the food creates one ordinary shared food record, returns to the
+preserved recipe review, and automatically matches the ingredient to that new
+food. Cancelling food creation returns to the recipe with the ingredient still
+unresolved. The recipe cannot be confirmed until every ingredient references a
+saved food record.
+
+If the recipe is cancelled after one or more foods were explicitly confirmed,
+those foods remain available because they are complete reusable food records.
+
 ---
 
 # 20. Food Matching
@@ -824,6 +914,7 @@ If an interpreted meal contains a food that is not in the database:
 2. offer to create a food
 3. allow:
 
+   * AI-assisted food creation from typed or pasted nutrition facts
    * nutrition-label scanning
    * manual nutrition entry
    * AI-assisted generic estimate if deliberately enabled
@@ -1132,7 +1223,32 @@ Output:
 
 structured recipe JSON.
 
-## 32.4 Scan nutrition label
+## 32.4 Interpret food
+
+```text
+POST /api/interpret-food
+```
+
+Input:
+
+```json
+{
+  "text": "Example Brand yoghurt, per 100 g: protein 9.5 g...",
+  "mode": "extract"
+}
+```
+
+`mode` is `extract` or `estimate`. The unresolved-recipe Add Food workflow uses
+`estimate` and sends only the missing ingredient description. The backend adds
+the corresponding `ai-text` or `ai-estimate` provenance after model-output
+validation; provenance is not trusted from the model.
+
+Output:
+
+strict structured food interpretation JSON. The route must not accept or return
+an authoritative Points value.
+
+## 32.5 Scan nutrition label
 
 ```text
 POST /api/scan-label
@@ -1389,6 +1505,10 @@ Implement:
 3. AI review/confirmation screen
 4. recipe interpretation
 5. unresolved food matching
+6. food-record interpretation from typed or pasted nutrition facts
+7. food review using the ordinary food editor
+8. AI-assisted Add Food for unresolved recipe ingredients
+9. return to and resolve the preserved recipe review after food confirmation
 
 ## Phase 4 — voice
 
@@ -1454,17 +1574,36 @@ AI output is shown for review before insertion.
 
 The application calculates points from matched foods, not from an AI-generated points number.
 
-## 44.6 Voice
+## 44.6 AI food
+
+Given typed or pasted food nutrition and serving information, structured output
+is shown in the ordinary food editor before insertion.
+
+Points are calculated from reviewed nutrition by deterministic application code.
+Cancel saves nothing, missing required values block confirmation, and Confirm
+creates one ordinary shared food record.
+
+## 44.7 AI recipe with a missing food
+
+Given an interpreted recipe containing an ingredient absent from the food
+database, `Add food with AI` shows editable nutritional suggestions labelled
+as an AI estimate.
+
+Cancelling returns to the still-unresolved recipe. Confirming creates an
+ordinary food, returns to the preserved recipe review, and resolves the
+ingredient. The subsequently confirmed recipe references that food record.
+
+## 44.8 Voice
 
 Recorded speech is transcribed and the transcript remains visible during confirmation.
 
 No diary data is saved until confirmation.
 
-## 44.7 Nutrition label
+## 44.9 Nutrition label
 
 An image-derived food record is shown to the user before being written to the food database.
 
-## 44.8 Backup
+## 44.10 Backup
 
 Export, clear local data, import the backup, and reproduce the original data.
 

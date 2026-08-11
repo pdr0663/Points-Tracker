@@ -41,14 +41,28 @@ function requireNutrient(value, label) {
   }
 }
 
+function validateText(value) {
+  const text = value.trim();
+  if (!text) throw new AppError("VALIDATION_ERROR", "Text must not be empty.");
+  if (text.length > 20000) throw new AppError("VALIDATION_ERROR", "Text is too long.", 413);
+  return text;
+}
+
 export function validateTextRequest(value) {
   if (!isRecord(value) || Object.keys(value).length !== 1 || typeof value.text !== "string") {
     throw new AppError("VALIDATION_ERROR", "Request body must contain only a text string.");
   }
-  const text = value.text.trim();
-  if (!text) throw new AppError("VALIDATION_ERROR", "Text must not be empty.");
-  if (text.length > 20000) throw new AppError("VALIDATION_ERROR", "Text is too long.", 413);
-  return text;
+  return validateText(value.text);
+}
+
+export function validateFoodRequest(value) {
+  if (!isRecord(value)
+      || Object.keys(value).sort().join(",") !== "mode,text"
+      || typeof value.text !== "string"
+      || !["extract", "estimate"].includes(value.mode)) {
+    throw new AppError("VALIDATION_ERROR", "Request body must contain text and an extract or estimate mode.");
+  }
+  return { text: validateText(value.text), mode: value.mode };
 }
 
 export function validateMeal(value) {
@@ -85,6 +99,39 @@ export function validateRecipe(value) {
     requirePositiveNumber(ingredient.quantity, `${label} quantity`);
     requireString(ingredient.unit, `${label} unit`);
   });
+  return value;
+}
+
+export function validateFoodInterpretation(value, options = {}) {
+  const estimate = options.mode === "estimate";
+  requireExactKeys(value, ["type", "name", "brand", "servings", "nutrition"], "Food interpretation");
+  if (value.type !== "food") throw new AppError("AI_INVALID_RESPONSE", "Food interpretation has the wrong type.", 502);
+  requireString(value.name, "Food name", { nullable: !estimate });
+  requireString(value.brand, "Food brand", { nullable: true });
+  if (!Array.isArray(value.servings) || value.servings.length > 20 || (estimate && value.servings.length < 1)) {
+    throw new AppError("AI_INVALID_RESPONSE", estimate
+      ? "Estimated food must contain between 1 and 20 servings."
+      : "Food servings must contain at most 20 items.", 502);
+  }
+  value.servings.forEach((serving, index) => {
+    const label = `Food serving ${index + 1}`;
+    requireExactKeys(serving, ["description", "grams"], label);
+    requireString(serving.description, `${label} description`, { nullable: !estimate });
+    requirePositiveNumber(serving.grams, `${label} grams`, { nullable: !estimate });
+  });
+  requireExactKeys(value.nutrition, ["basis", "servingGrams", "protein", "carbohydrate", "fat", "fibre"], "Food nutrition");
+  if (!["per-100g", "per-serving"].includes(value.nutrition.basis)) {
+    throw new AppError("AI_INVALID_RESPONSE", "Food nutrition basis is invalid.", 502);
+  }
+  requirePositiveNumber(value.nutrition.servingGrams, "Food nutrition serving grams", {
+    nullable: !estimate || value.nutrition.basis === "per-100g"
+  });
+  for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
+    requireNutrient(value.nutrition[nutrient], nutrient);
+    if (estimate && value.nutrition[nutrient] === null) {
+      throw new AppError("AI_INVALID_RESPONSE", `Estimated ${nutrient} must be provided.`, 502);
+    }
+  }
   return value;
 }
 

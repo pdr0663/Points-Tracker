@@ -5,7 +5,9 @@ import {
   calculateAiResolution,
   createAiClient,
   createAiResolutions,
+  foodDraftFromInterpretation,
   matchFood,
+  validateFoodInterpretation,
   validateMealInterpretation,
   validateRecipeInterpretation
 } from "../public/js/ai.js";
@@ -77,6 +79,42 @@ test("network errors become a user-safe error without losing input in applicatio
     assert.match(error.message, /original text has been kept/iu);
     return true;
   });
+});
+
+test("AI food client sends explicit mode and validates server-owned provenance", async () => {
+  let request;
+  const response = {
+    type: "food",
+    name: "Brown onion",
+    brand: null,
+    servings: [{ description: "1 medium onion", grams: 110 }],
+    nutrition: { basis: "per-100g", servingGrams: null, protein: 1.1, carbohydrate: 9.3, fat: 0.1, fibre: 1.7 },
+    provenance: "ai-estimate"
+  };
+  const client = createAiClient({
+    fetchImpl: async (url, init) => {
+      request = { url, body: JSON.parse(init.body) };
+      return new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } });
+    }
+  });
+  assert.equal((await client.interpretFood("brown onion", "estimate")).provenance, "ai-estimate");
+  assert.equal(request.url, "/api/interpret-food");
+  assert.deepEqual(request.body, { text: "brown onion", mode: "estimate" });
+  assert.throws(() => validateFoodInterpretation({ ...response, provenance: "model-claimed" }), { code: "AI_INVALID_RESPONSE" });
+});
+
+test("per-serving AI nutrition is converted deterministically for the ordinary food form", () => {
+  const draft = foodDraftFromInterpretation({
+    type: "food",
+    name: "Yoghurt",
+    brand: "Example",
+    servings: [{ description: "1 tub", grams: 200 }],
+    nutrition: { basis: "per-serving", servingGrams: 200, protein: 20, carbohydrate: 10, fat: 4, fibre: 2 },
+    provenance: "ai-text"
+  });
+  assert.deepEqual(draft.nutritionPer100g, { protein: 10, carbohydrate: 5, fat: 2, fibre: 1 });
+  assert.equal(draft.source, "ai-text");
+  assert.deepEqual(draft.servings, [{ description: "1 tub", grams: 200 }]);
 });
 
 test("food matching follows exact, alias, close-candidate, unresolved order", () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConfig, loadLocalEnv } from "./config.js";
 import { createOpenAIService } from "./openai.js";
-import { AppError, validateTextRequest } from "./validation.js";
+import { AppError, validateFoodRequest, validateTextRequest } from "./validation.js";
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 const publicDirectory = path.resolve(serverDirectory, "../public");
@@ -126,6 +126,11 @@ async function handleApi(request, response, pathname, config, ai) {
       sendJson(response, 200, await ai.interpretRecipe(text), headers);
       return;
     }
+    if (request.method === "POST" && pathname === "/api/interpret-food") {
+      const { text, mode } = validateFoodRequest(await readJson(request, config.limits.json));
+      sendJson(response, 200, await ai.interpretFood(text, mode), headers);
+      return;
+    }
     if (request.method === "POST" && pathname === "/api/transcribe") {
       const upload = await readUpload(request, config.limits.audio, acceptedAudio, "audio");
       sendJson(response, 200, await ai.transcribe(upload.data, upload.contentType), headers);
@@ -136,7 +141,7 @@ async function handleApi(request, response, pathname, config, ai) {
       sendJson(response, 200, await ai.scanLabel(upload.data, upload.contentType), headers);
       return;
     }
-    if (["/api/health", "/api/interpret-meal", "/api/interpret-recipe", "/api/transcribe", "/api/scan-label"].includes(pathname)) {
+    if (["/api/health", "/api/interpret-meal", "/api/interpret-recipe", "/api/interpret-food", "/api/transcribe", "/api/scan-label"].includes(pathname)) {
       throw new AppError("VALIDATION_ERROR", "Method not allowed.", 405);
     }
     throw new AppError("VALIDATION_ERROR", "API endpoint not found.", 404);

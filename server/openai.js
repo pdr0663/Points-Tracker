@@ -1,5 +1,5 @@
-import { foodLabelSchema, mealSchema, recipeSchema } from "./schemas.js";
-import { AppError, validateFoodLabel, validateMeal, validateRecipe, validateTranscript } from "./validation.js";
+import { foodInterpretationSchema, foodLabelSchema, mealSchema, recipeSchema } from "./schemas.js";
+import { AppError, validateFoodInterpretation, validateFoodLabel, validateMeal, validateRecipe, validateTranscript } from "./validation.js";
 
 const API_BASE_URL = "https://api.openai.com/v1";
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -7,6 +7,8 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const prompts = Object.freeze({
   meal: "Interpret only the meal text supplied by the user. Preserve explicit quantities and units. Do not calculate or return Points, calories, nutrition, health advice, user details, or information not present in the text. Use null for absent notes.",
   recipe: "Extract only the recipe name, serving count, ingredients, quantities, and units from the supplied recipe text. Do not calculate or return Points, calories, nutrition, health advice, user details, or information not present in the text.",
+  foodExtract: "Extract only the food identity, serving information, nutrition basis, and nutrient values stated in the supplied text. Preserve whether nutrition is per 100 g or per serving. Do not estimate or invent missing values; use null. Do not calculate or return Points, calories, health advice, or user details.",
+  foodEstimate: "Suggest typical generic nutrition for the named food. Return complete protein, carbohydrate, fat, and fibre values per 100 g plus at least one practical serving with its gram weight. Use a generic food name and null brand unless the user supplied a brand. These are estimates for human review. Do not calculate or return Points, calories, health advice, or user details.",
   label: "Extract factual information visible on this nutrition label. Do not estimate or invent missing values. Return null for every unknown value, including fibre. Convert to per-100-g values only when the label provides them or a valid conversion is possible from a stated serving weight. Do not calculate or return Points or health advice."
 });
 
@@ -130,6 +132,18 @@ export function createOpenAIService(config, options = {}) {
         content: [{ type: "input_text", text }],
         validate: validateRecipe
       });
+    },
+
+    async interpretFood(text, mode) {
+      const result = await structured({
+        model: config.textModel,
+        name: "food_interpretation",
+        schema: foodInterpretationSchema,
+        prompt: mode === "estimate" ? prompts.foodEstimate : prompts.foodExtract,
+        content: [{ type: "input_text", text }],
+        validate: (value) => validateFoodInterpretation(value, { mode })
+      });
+      return { ...result, provenance: mode === "estimate" ? "ai-estimate" : "ai-text" };
     },
 
     scanLabel(image, contentType) {

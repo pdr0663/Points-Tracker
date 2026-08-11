@@ -51,6 +51,28 @@ test("invalid structured model output is rejected", async () => {
   await assert.rejects(service.interpretMeal("toast"), { code: "AI_INVALID_RESPONSE", status: 502 });
 });
 
+test("food estimates use strict structured output and receive server-owned provenance", async () => {
+  let body;
+  const service = createOpenAIService(config, {
+    fetchImpl: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return jsonResponse({ output_text: JSON.stringify({
+        type: "food",
+        name: "Brown onion",
+        brand: null,
+        servings: [{ description: "1 medium onion", grams: 110 }],
+        nutrition: { basis: "per-100g", servingGrams: null, protein: 1.1, carbohydrate: 9.3, fat: 0.1, fibre: 1.7 }
+      }) });
+    }
+  });
+  const result = await service.interpretFood("brown onion", "estimate");
+  assert.equal(result.provenance, "ai-estimate");
+  assert.equal(body.text.format.name, "food_interpretation");
+  assert.equal(body.text.format.strict, true);
+  assert.match(body.instructions, /estimates for human review/iu);
+  assert.doesNotMatch(JSON.stringify(body.text.format.schema), /points/iu);
+});
+
 test("label scanning sends an image data URL and preserves null fibre", async () => {
   let body;
   const service = createOpenAIService(config, {

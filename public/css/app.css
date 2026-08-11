@@ -527,6 +527,37 @@ textarea:focus-visible,
   margin: 1rem 0;
 }
 
+.ai-estimate-notice,
+.ai-duplicate-warning {
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  color: var(--text);
+  background: var(--surface-highlight);
+  border: 2px solid var(--accent);
+  border-radius: 0.75rem;
+}
+
+.ai-duplicate-warning p {
+  margin-top: 0;
+}
+
+.food-source-badge {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.18rem 0.5rem;
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 800;
+  background: var(--surface-highlight);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+}
+
+.food-source-badge--extracted {
+  background: var(--surface-muted);
+  border-color: var(--border);
+}
+
 .food-search {
   display: flex;
   flex-wrap: wrap;

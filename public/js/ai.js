@@ -22,13 +22,29 @@ function requireExactKeys(value, keys, label) {
   }
 }
 
-function requireText(value, label) {
-  if (typeof value !== "string" || !value.trim()) throw new AiRequestError("AI_INVALID_RESPONSE", `${label} is missing.`);
+function requireText(value, label, maxLength = 300) {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
+    throw new AiRequestError("AI_INVALID_RESPONSE", `${label} is missing or too long.`);
+  }
 }
 
 function requirePositiveNumber(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new AiRequestError("AI_INVALID_RESPONSE", `${label} must be greater than zero.`);
+  }
+}
+
+function requireNullableText(value, label) {
+  if (value !== null) requireText(value, label);
+}
+
+function requireNullablePositiveNumber(value, label) {
+  if (value !== null) requirePositiveNumber(value, label);
+}
+
+function requireNutrient(value, label) {
+  if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+    throw new AiRequestError("AI_INVALID_RESPONSE", `${label} must be zero, a positive number, or unknown.`);
   }
 }
 
@@ -42,7 +58,7 @@ export function validateMealInterpretation(value) {
     requireText(item.description, `Meal item ${index + 1} description`);
     requirePositiveNumber(item.quantity, `Meal item ${index + 1} quantity`);
     requireText(item.unit, `Meal item ${index + 1} unit`);
-    if (item.notes !== null && typeof item.notes !== "string") throw new AiRequestError("AI_INVALID_RESPONSE", `Meal item ${index + 1} notes are invalid.`);
+    if (item.notes !== null && (typeof item.notes !== "string" || item.notes.length > 500)) throw new AiRequestError("AI_INVALID_RESPONSE", `Meal item ${index + 1} notes are invalid.`);
   });
   return value;
 }
@@ -62,6 +78,71 @@ export function validateRecipeInterpretation(value) {
     requireText(ingredient.unit, `Recipe ingredient ${index + 1} unit`);
   });
   return value;
+}
+
+export function validateFoodInterpretation(value) {
+  requireExactKeys(value, ["type", "name", "brand", "servings", "nutrition", "provenance"], "Food interpretation");
+  if (value.type !== "food") throw new AiRequestError("AI_INVALID_RESPONSE", "Food interpretation has the wrong type.");
+  requireNullableText(value.name, "Food name");
+  requireNullableText(value.brand, "Food brand");
+  if (!Array.isArray(value.servings) || value.servings.length > 20) {
+    throw new AiRequestError("AI_INVALID_RESPONSE", "Food servings are invalid.");
+  }
+  value.servings.forEach((serving, index) => {
+    requireExactKeys(serving, ["description", "grams"], `Food serving ${index + 1}`);
+    requireNullableText(serving.description, `Food serving ${index + 1} description`);
+    requireNullablePositiveNumber(serving.grams, `Food serving ${index + 1} grams`);
+  });
+  requireExactKeys(value.nutrition, ["basis", "servingGrams", "protein", "carbohydrate", "fat", "fibre"], "Food nutrition");
+  if (!["per-100g", "per-serving"].includes(value.nutrition.basis)) {
+    throw new AiRequestError("AI_INVALID_RESPONSE", "Food nutrition basis is invalid.");
+  }
+  requireNullablePositiveNumber(value.nutrition.servingGrams, "Food nutrition serving grams");
+  for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
+    requireNutrient(value.nutrition[nutrient], nutrient);
+  }
+  if (!["ai-text", "ai-estimate"].includes(value.provenance)) {
+    throw new AiRequestError("AI_INVALID_RESPONSE", "Food provenance is invalid.");
+  }
+  if (value.provenance === "ai-estimate") {
+    requireText(value.name, "Estimated food name");
+    if (!value.servings.length || value.servings.some((serving) => serving.description === null || serving.grams === null)) {
+      throw new AiRequestError("AI_INVALID_RESPONSE", "Estimated food servings are incomplete.");
+    }
+    for (const nutrient of ["protein", "carbohydrate", "fat", "fibre"]) {
+      if (value.nutrition[nutrient] === null) throw new AiRequestError("AI_INVALID_RESPONSE", `Estimated ${nutrient} is missing.`);
+    }
+    if (value.nutrition.basis === "per-serving" && value.nutrition.servingGrams === null) {
+      throw new AiRequestError("AI_INVALID_RESPONSE", "Estimated per-serving nutrition is missing its serving weight.");
+    }
+  }
+  return value;
+}
+
+export function foodDraftFromInterpretation(value) {
+  const interpretation = validateFoodInterpretation(value);
+  const { nutrition } = interpretation;
+  const canConvert = nutrition.basis === "per-100g"
+    || (Number.isFinite(nutrition.servingGrams) && nutrition.servingGrams > 0);
+  const factor = nutrition.basis === "per-100g" ? 1 : 100 / nutrition.servingGrams;
+  const nutritionPer100g = Object.fromEntries(
+    ["protein", "carbohydrate", "fat", "fibre"].map((nutrient) => [
+      nutrient,
+      canConvert && nutrition[nutrient] !== null ? nutrition[nutrient] * factor : null
+    ])
+  );
+  return {
+    name: interpretation.name ?? "",
+    brand: interpretation.brand ?? "",
+    nutritionPer100g,
+    servings: interpretation.servings.map((serving) => ({
+      description: serving.description ?? "",
+      grams: serving.grams ?? ""
+    })),
+    source: interpretation.provenance,
+    nutritionBasis: nutrition.basis,
+    nutritionServingGrams: nutrition.servingGrams
+  };
 }
 
 function normalizedBaseUrl(baseUrl) {
@@ -116,6 +197,15 @@ export function createAiClient(options = {}) {
         body: JSON.stringify({ text })
       });
       return validateRecipeInterpretation(result);
+    },
+    async interpretFood(text, mode = "extract") {
+      if (!["extract", "estimate"].includes(mode)) throw new TypeError("Food interpretation mode must be extract or estimate.");
+      const result = await request("/api/interpret-food", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, mode })
+      });
+      return validateFoodInterpretation(result);
     }
   });
 }

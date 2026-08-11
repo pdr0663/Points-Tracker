@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateFoodLabel, validateMeal, validateRecipe, validateTextRequest } from "../server/validation.js";
+import {
+  validateFoodInterpretation,
+  validateFoodLabel,
+  validateFoodRequest,
+  validateMeal,
+  validateRecipe,
+  validateTextRequest
+} from "../server/validation.js";
 
 test("meal validation accepts the canonical response", () => {
   const meal = {
@@ -47,8 +54,50 @@ test("label validation rejects negative nutrients and extra fields", () => {
   }), { code: "AI_INVALID_RESPONSE" });
 });
 
+test("food interpretation distinguishes incomplete extraction from complete estimates", () => {
+  const extraction = {
+    type: "food",
+    name: "Yoghurt",
+    brand: null,
+    servings: [],
+    nutrition: {
+      basis: "per-serving",
+      servingGrams: null,
+      protein: 9.5,
+      carbohydrate: null,
+      fat: null,
+      fibre: null
+    }
+  };
+  assert.equal(validateFoodInterpretation(extraction, { mode: "extract" }), extraction);
+  assert.throws(() => validateFoodInterpretation(extraction, { mode: "estimate" }), { code: "AI_INVALID_RESPONSE" });
+
+  const estimate = {
+    type: "food",
+    name: "Brown onion",
+    brand: null,
+    servings: [{ description: "1 medium onion", grams: 110 }],
+    nutrition: {
+      basis: "per-100g",
+      servingGrams: null,
+      protein: 1.1,
+      carbohydrate: 9.3,
+      fat: 0.1,
+      fibre: 1.7
+    }
+  };
+  assert.equal(validateFoodInterpretation(estimate, { mode: "estimate" }), estimate);
+  assert.throws(() => validateFoodInterpretation({ ...estimate, points: 1 }), { code: "AI_INVALID_RESPONSE" });
+});
+
 test("text requests contain only the text needed by the AI task", () => {
   assert.equal(validateTextRequest({ text: "  two slices of toast  " }), "two slices of toast");
   assert.throws(() => validateTextRequest({ text: "toast", userName: "Person" }), { code: "VALIDATION_ERROR" });
   assert.throws(() => validateTextRequest({ text: "   " }), { code: "VALIDATION_ERROR" });
+});
+
+test("food requests require an explicit extraction or estimate mode", () => {
+  assert.deepEqual(validateFoodRequest({ text: "  brown onion  ", mode: "estimate" }), { text: "brown onion", mode: "estimate" });
+  assert.throws(() => validateFoodRequest({ text: "brown onion" }), { code: "VALIDATION_ERROR" });
+  assert.throws(() => validateFoodRequest({ text: "brown onion", mode: "guess" }), { code: "VALIDATION_ERROR" });
 });
